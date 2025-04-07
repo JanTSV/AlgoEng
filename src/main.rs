@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::error::Error;
 
-type Edge = (u64, u64, u64);
+type Edge = (u64, u64);
 type OffsetArray = (Vec<Edge>, Vec<u64>);
 
 fn parse_graph(filename: &str) -> Result<(OffsetArray, OffsetArray), Box<dyn Error>> {
@@ -32,8 +32,8 @@ fn parse_graph(filename: &str) -> Result<(OffsetArray, OffsetArray), Box<dyn Err
         let source : u64 = parts[0].parse()?;
         let target : u64 = parts[1].parse()?;
         let weight : u64 = parts[2].parse()?;
-        outgoing_edges[source as usize].push((source, target, weight));
-        incoming_edges[target as usize].push((source, target, weight));
+        outgoing_edges[source as usize].push((target, weight));
+        incoming_edges[target as usize].push((source, weight));
     }
 
     // Return the offset-arrays

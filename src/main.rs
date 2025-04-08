@@ -4,6 +4,8 @@ use std::error::Error;
 use std::time::Instant;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 
 type Edge = (u64, u64);
 type OffsetArray = (Vec<Edge>, Vec<u64>);
@@ -68,7 +70,7 @@ fn parse_graph(filename: &str) -> Result<(OffsetArray, OffsetArray), Box<dyn Err
     Ok((outgoing, incoming))
 }
 
-fn dfs(graph: &OffsetArray, start: u64, visited: &mut Vec<bool>) {
+fn dfs(graph: &OffsetArray, incoming_graph: &OffsetArray, start: u64, visited: &mut Vec<bool>) {
     let mut stack = Vec::new();
     stack.push(start);
 
@@ -80,8 +82,16 @@ fn dfs(graph: &OffsetArray, start: u64, visited: &mut Vec<bool>) {
 
         visited[node] = true;
 
+        // Traverse bidirectionally because we need weak comps
         for i in graph.1[node]..graph.1[node + 1] {
             let neighbor = graph.0[i as usize].0;
+            if !visited[neighbor as usize] {
+                stack.push(neighbor);
+            }
+        }
+
+        for i in incoming_graph.1[node]..incoming_graph.1[node + 1] {
+            let neighbor = incoming_graph.0[i as usize].0;
             if !visited[neighbor as usize] {
                 stack.push(neighbor);
             }
@@ -89,14 +99,14 @@ fn dfs(graph: &OffsetArray, start: u64, visited: &mut Vec<bool>) {
     }
 }
 
-fn calc_weakly_connected_comps(graph: &OffsetArray) -> usize {
+fn calc_weakly_connected_comps(graph: &OffsetArray, incoming_graph: &OffsetArray) -> usize {
     let mut num_comps = 0;
     let mut visited = vec![false; graph.1.len() - 1];
 
-    for node in 0..graph.1.len() - 1 {
+    for node in 0..visited.len() {
         if !visited[node] {
             num_comps += 1;
-            dfs(graph, node as u64, &mut visited);
+            dfs(graph, incoming_graph, node as u64, &mut visited);
         }
     }
 
@@ -107,13 +117,16 @@ fn permutate_graph(graph: &OffsetArray, perms: &Vec<u64>) -> OffsetArray {
     let mut perm_edges: Vec<Vec<Edge>> = vec![Vec::new(); perms.len()];
 
     for (i, perm) in perms.iter().enumerate() {
-        for j in graph.1[*perm as usize]..graph.1[*perm as usize + 1] {
+        for j in graph.1[i]..graph.1[i + 1] {
             let (target, weight) = graph.0[j as usize];
-            perm_edges[i].push((perms[target as usize], weight));
+            perm_edges[*perm as usize].push((perms[target as usize], weight));
         }
     }
 
-    create_offset_array(perm_edges)
+    let perm_graph = create_offset_array(perm_edges);
+    assert_eq!(perm_graph.0.len(), graph.0.len());
+    assert_eq!(perm_graph.1.len(), graph.1.len());
+    perm_graph
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -187,30 +200,32 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Question 1: Load the DMI graph
     let start = Instant::now();
     println!("Started parsing...");
-    let (graph, _) = parse_graph("inputs/germany.fmi")?;
+    let (graph, incoming_graph) = parse_graph("inputs/MV.fmi")?;
     let duration = start.elapsed();
     println!("Loaded graph in {:.2?}", duration);
 
     // Question 2: Calculate the weaky connected components
     let start = Instant::now();
-    let num_comps = calc_weakly_connected_comps(&graph);
+    let num_comps = calc_weakly_connected_comps(&graph, &incoming_graph);
     let duration = start.elapsed();
     println!("#weakly coupled components: {num_comps} [{:.2?}]", duration);
     //println!("{:?}", graph.1);
 
     // Question 3: Randomly permutate the graph using a hash function and try question 2 again
     let mut perms: Vec<u64> = (0..graph.1.len() - 1).map(|i| i as u64).collect();
-    perms.reverse();
+    let mut rng = thread_rng();
+    perms.shuffle(&mut rng);
     let perm_graph = permutate_graph(&graph, &perms);
+    let perm_incoming_graph = permutate_graph(&incoming_graph, &perms);
     let start = Instant::now();
-    let num_comps = calc_weakly_connected_comps(&perm_graph);
+    let num_comps = calc_weakly_connected_comps(&perm_graph, &perm_incoming_graph);
     let duration = start.elapsed();
     println!("#weakly coupled components (perm): {num_comps} [{:.2?}]", duration);
 
     // Question 4: Shortest path of 100 randomly chosen (s, t) pairs
     let mut dijkstra = Dijkstra::new(&graph);
-    let s: u64 = 8371827;
-    let t: u64 = 16743653;
+    let s: u64 = 214733;
+    let t: u64 = 429466;
     let start = Instant::now();
     match dijkstra.shortest_path(s, t) {
         Some(dist) => print!("Found a shortest path from {s} to {t}: {dist}"),

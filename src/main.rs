@@ -2,6 +2,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::error::Error;
 use std::time::Instant;
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 
 type Edge = (u64, u64);
 type OffsetArray = (Vec<Edge>, Vec<u64>);
@@ -101,60 +103,93 @@ fn calc_weakly_connected_comps(graph: &OffsetArray) -> usize {
     num_comps
 }
 
-fn custom_rng(seed: u64) -> Box<dyn FnMut() -> u64> {
-    // Simple Linear Congruential Generator (LCG): x_n+1 = (a * x_n + c) % m
-    // Constants chosen for good randomness properties (from Knuth's book)
-    let a: u64 = 6364136223846793005;
-    let c: u64 = 1;
-    let m: u64 = 2u64.pow(64);
+fn permutate_graph(graph: &OffsetArray, perms: &Vec<u64>) -> OffsetArray {
+    let mut perm_edges: Vec<Vec<Edge>> = vec![Vec::new(); perms.len()];
 
-    let mut state = seed;
-
-    Box::new(move || {
-        state = state.wrapping_mul(a).wrapping_add(c);
-        state % m
-    })
-}
-
-fn random_permutation_list(n: usize, seed: u64) -> Vec<u64> {
-    let mut perm: Vec<u64> = (0..n as u64).collect();
-    let mut rng = custom_rng(seed); // Get a custom RNG function
-
-    // Fisher-Yates shuffle using custom RNG
-    for i in (1..n).rev() {
-        let j = (rng() % (i as u64 + 1)) as usize; // Generate a random index between 0 and i
-        perm.swap(i, j); // Swap the elements at indices i and j
-    }
-
-    perm
-}
-
-fn permute_graph(original: &OffsetArray, perm: &[u64]) -> OffsetArray {
-    let num_nodes: usize = perm.len();
-    let mut adj_list = vec![Vec::new(); num_nodes];
-
-    for node in 0..num_nodes {
-        let start = original.1[node]; // Start index for node in the flat edge list
-        let end = original.1[node + 1]; // End index for node in the flat edge list
-
-        // Traverse each edge for the node
-        for i in start..end {
-            let (target, weight) = original.0[i as usize];
-
-            // Apply the permutation to source and target
-            let new_source = perm[node]; // Apply permutation to source node
-            let new_target = perm[target as usize]; // Apply permutation to target node
-
-            adj_list[new_source as usize].push((new_target, weight)); // Update adj list
+    for (i, perm) in perms.iter().enumerate() {
+        for j in graph.1[*perm as usize]..graph.1[*perm as usize + 1] {
+            let (target, weight) = graph.0[j as usize];
+            perm_edges[i].push((perms[target as usize], weight));
         }
     }
 
-    create_offset_array(adj_list) // Rebuild the offset array with permuted edges
+    create_offset_array(perm_edges)
+}
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+struct Distance {
+    weight: u64,
+    id: u64,
+}
+
+impl Distance {
+    pub fn new(weight: u64, id: u64) -> Self {
+        Distance { weight, id }
+    }
+}
+
+impl Ord for Distance {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Flip this to convert the defaulty max heap to a min heap
+        other.weight.cmp(&self.weight)
+            .then_with(|| self.id.cmp(&other.id))
+    }
+}
+
+impl PartialOrd for Distance {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+struct Dijkstra<'a> {
+    graph: &'a OffsetArray,
+    distances: Vec<Option<u64>>,
+    heap: BinaryHeap<Distance>
+}
+
+impl<'a> Dijkstra<'a> {
+    pub fn new(graph: &'a OffsetArray) -> Self {
+        Dijkstra { graph, distances: vec![None; graph.1.len() - 1], heap: BinaryHeap::new() }
+    }
+
+    pub fn shortest_path(&mut self, s: u64, t: u64) -> Option<u64> {
+        // Push start to heap and set dist to 0
+        self.heap.push(Distance::new(0, s));
+        self.distances[s as usize] = Some(0);
+
+        while let Some(Distance { weight, id }) = self.heap.pop() {
+            if id == t {
+                return Some(weight);
+            }
+
+            for i in self.graph.1[id as usize]..self.graph.1[id as usize + 1] {
+                let edge = self.graph.0[i as usize];
+                match self.distances[edge.0 as usize] {
+                    None => {
+                        self.distances[edge.0 as usize] = Some(weight + edge.1);
+                        self.heap.push(Distance::new(weight + edge.1, edge.0));
+                    }
+                    Some(curr_weight) if curr_weight > weight + edge.1  => {
+                        self.distances[edge.0 as usize] = Some(weight + edge.1);
+                        self.heap.push(Distance::new(weight + edge.1, edge.0));
+                    }
+                    _ => continue
+                }
+            }
+        }
+
+        None
+    }
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Question 1: Load the DMI graph
-    let (graph, _) = parse_graph("inputs/MV.fmi")?;
+    let start = Instant::now();
+    println!("Started parsing...");
+    let (graph, _) = parse_graph("inputs/germany.fmi")?;
+    let duration = start.elapsed();
+    println!("Loaded graph in {:.2?}", duration);
 
     // Question 2: Calculate the weaky connected components
     let start = Instant::now();
@@ -164,15 +199,26 @@ fn main() -> Result<(), Box<dyn Error>> {
     //println!("{:?}", graph.1);
 
     // Question 3: Randomly permutate the graph using a hash function and try question 2 again
-    let salt = 0x0;
-    let perm = random_permutation_list(graph.1.len() - 1, salt);
-    let perm_graph = permute_graph(&graph, &perm);
-
+    let mut perms: Vec<u64> = (0..graph.1.len() - 1).map(|i| i as u64).collect();
+    perms.reverse();
+    let perm_graph = permutate_graph(&graph, &perms);
     let start = Instant::now();
     let num_comps = calc_weakly_connected_comps(&perm_graph);
     let duration = start.elapsed();
     println!("#weakly coupled components (perm): {num_comps} [{:.2?}]", duration);
-    //println!("{:?}", perm_graph.1);
+
+    // Question 4: Shortest path of 100 randomly chosen (s, t) pairs
+    let mut dijkstra = Dijkstra::new(&graph);
+    let s: u64 = 8371827;
+    let t: u64 = 16743653;
+    let start = Instant::now();
+    match dijkstra.shortest_path(s, t) {
+        Some(dist) => print!("Found a shortest path from {s} to {t}: {dist}"),
+        None => print!("Did NOT find a path between {s} and {t}")
+    }
+    let duration = start.elapsed();
+    println!(" [{:.2?}]", duration);
+
 
     Ok(())
 }

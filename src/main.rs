@@ -1,11 +1,13 @@
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
 use std::error::Error;
 use std::time::Instant;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
+use rand::Rng;
+
 
 type Edge = (u64, u64);
 type OffsetArray = (Vec<Edge>, Vec<u64>);
@@ -167,6 +169,10 @@ impl<'a> Dijkstra<'a> {
     }
 
     pub fn shortest_path(&mut self, s: u64, t: u64) -> Option<u64> {
+        // TODO: Optimize this
+        self.distances = vec![None; self.graph.1.len() - 1];
+        self.heap.clear();
+
         // Push start to heap and set dist to 0
         self.heap.push(Distance::new(0, s));
         self.distances[s as usize] = Some(0);
@@ -194,6 +200,30 @@ impl<'a> Dijkstra<'a> {
 
         None
     }
+}
+
+fn read_query(filename: &str) -> Result<Vec<(u64, u64)>, Box<dyn Error>> {
+    let file = File::open(filename)?;
+    let reader = BufReader::new(file);
+
+    // Filter out comments and empty lines (idk the specific syntax of the queries.txt file)
+    Ok(reader
+        .lines()
+        .filter_map(Result::ok)
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 2 {
+                return None;
+            }
+
+            let source: u64 = parts[0].parse().ok()?;
+            let target: u64 = parts[1].parse().ok()?;
+
+            Some((source, target))
+        })
+        .collect())
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -224,16 +254,48 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Question 4: Shortest path of 100 randomly chosen (s, t) pairs
     let mut dijkstra = Dijkstra::new(&graph);
-    let s: u64 = 214733;
-    let t: u64 = 429466;
+    let mut s: u64 = rng.gen_range(0..graph.1.len() as u64 - 1);
     let start = Instant::now();
-    match dijkstra.shortest_path(s, t) {
-        Some(dist) => print!("Found a shortest path from {s} to {t}: {dist}"),
-        None => print!("Did NOT find a path between {s} and {t}")
+
+    for i in 0..100 {
+        let start = Instant::now();
+        let t: u64 = rng.gen_range(0..graph.1.len() as u64 - 1);
+        match dijkstra.shortest_path(s, t) {
+            Some(dist) => print!("Found a shortest path from {s} to {t}: {dist}"),
+            None => print!("Did NOT find a path between {s} and {t}")
+        }
+        let duration = start.elapsed();
+        println!(" [{:.2?}]", duration);
+
+        // Only change s every 10th step
+        if i % 10 == 0 {
+            s = rng.gen_range(0..graph.1.len() as u64 - 1);
+        }
+    }
+
+    let duration = start.elapsed();
+    println!("Needed {:.2?} for 100 queries", duration);
+
+    // Question 6: Run Dijkstra on queries
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open("output.txt")?;
+
+    let start = Instant::now();
+    for query in read_query("inputs/queries.txt").unwrap() {
+        let query_start = Instant::now();
+        write!(file, "{} {} ", query.0, query.1)?;
+        match dijkstra.shortest_path(query.0, query.1) {
+            Some(dist) => write!(file, "{} ", dist)?,
+            None => write!(file, "INF ")?
+        }
+
+        let duration = query_start.elapsed();
+        writeln!(file, "{:.2?}", duration)?;
     }
     let duration = start.elapsed();
-    println!(" [{:.2?}]", duration);
-
+    println!("Needed {:.2?} for queries.txt", duration);
 
     Ok(())
 }

@@ -160,22 +160,26 @@ impl PartialOrd for Distance {
 struct Dijkstra<'a> {
     graph: &'a OffsetArray,
     distances: Vec<Option<u64>>,
-    heap: BinaryHeap<Distance>
+    heap: BinaryHeap<Distance>,
+    visited: Vec<u64>
 }
 
 impl<'a> Dijkstra<'a> {
     pub fn new(graph: &'a OffsetArray) -> Self {
-        Dijkstra { graph, distances: vec![None; graph.1.len() - 1], heap: BinaryHeap::new() }
+        Dijkstra { graph, distances: vec![None; graph.1.len() - 1], heap: BinaryHeap::new(), visited: Vec::new() }
     }
 
     pub fn shortest_path(&mut self, s: u64, t: u64) -> Option<u64> {
-        // TODO: Optimize this
-        self.distances = vec![None; self.graph.1.len() - 1];
+        // Cleaup of previous run
+        while let Some(node) = self.visited.pop() {
+            self.distances[node as usize] = None;
+        }
         self.heap.clear();
 
         // Push start to heap and set dist to 0
         self.heap.push(Distance::new(0, s));
         self.distances[s as usize] = Some(0);
+        self.visited.push(s);
 
         while let Some(Distance { weight, id }) = self.heap.pop() {
             if id == t {
@@ -184,16 +188,10 @@ impl<'a> Dijkstra<'a> {
 
             for i in self.graph.1[id as usize]..self.graph.1[id as usize + 1] {
                 let edge = self.graph.0[i as usize];
-                match self.distances[edge.0 as usize] {
-                    None => {
-                        self.distances[edge.0 as usize] = Some(weight + edge.1);
-                        self.heap.push(Distance::new(weight + edge.1, edge.0));
-                    }
-                    Some(curr_weight) if curr_weight > weight + edge.1  => {
-                        self.distances[edge.0 as usize] = Some(weight + edge.1);
-                        self.heap.push(Distance::new(weight + edge.1, edge.0));
-                    }
-                    _ => continue
+                if self.distances[edge.0 as usize].map_or(true, |curr| weight + edge.1 < curr) {
+                    self.distances[edge.0 as usize] = Some(weight + edge.1);
+                    self.heap.push(Distance::new(weight + edge.1, edge.0));
+                    self.visited.push(edge.0);
                 }
             }
         }
@@ -206,7 +204,6 @@ fn read_query(filename: &str) -> Result<Vec<(u64, u64)>, Box<dyn Error>> {
     let file = File::open(filename)?;
     let reader = BufReader::new(file);
 
-    // Filter out comments and empty lines (idk the specific syntax of the queries.txt file)
     Ok(reader
         .lines()
         .filter_map(Result::ok)
@@ -274,7 +271,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let duration = start.elapsed();
-    println!("Needed {:.2?} for 100 queries", duration);
+    println!("Needed {:.2?} for 100 random queries", duration);
 
     // Question 6: Run Dijkstra on queries
     let mut file = OpenOptions::new()

@@ -227,7 +227,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Question 1: Load the DMI graph
     let start = Instant::now();
     println!("Started parsing...");
-    let (graph, incoming_graph) = parse_graph("inputs/MV.fmi")?;
+    let (graph, incoming_graph) = parse_graph("graph.fmi")?;
     let duration = start.elapsed();
     println!("Loaded graph in {:.2?}", duration);
 
@@ -281,7 +281,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .open("output.txt")?;
 
     let start = Instant::now();
-    for query in read_query("inputs/queries.txt").unwrap() {
+    for query in read_query("queries.txt").unwrap() {
         let query_start = Instant::now();
         write!(file, "{} {} ", query.0, query.1)?;
         match dijkstra.shortest_path(query.0, query.1) {

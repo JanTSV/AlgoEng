@@ -34,7 +34,7 @@ fn parse_graph(filename: &str) -> Result<(OffsetArray, OffsetArray), Box<dyn Err
     // Filter out comments and empty lines
     let mut lines = reader
         .lines()
-        .filter_map(Result::ok)
+        .map_while(Result::ok)
         .map(|line| line.trim().to_string())
         .filter(|line| !line.is_empty() && !line.starts_with('#'));
 
@@ -72,7 +72,7 @@ fn parse_graph(filename: &str) -> Result<(OffsetArray, OffsetArray), Box<dyn Err
     Ok((outgoing, incoming))
 }
 
-fn dfs(graph: &OffsetArray, incoming_graph: &OffsetArray, start: u64, visited: &mut Vec<bool>) {
+fn dfs(graph: &OffsetArray, incoming_graph: &OffsetArray, start: u64, visited: &mut [bool]) {
     let mut stack = Vec::new();
     stack.push(start);
 
@@ -115,7 +115,7 @@ fn calc_weakly_connected_comps(graph: &OffsetArray, incoming_graph: &OffsetArray
     num_comps
 }
 
-fn permutate_graph(graph: &OffsetArray, perms: &Vec<u64>) -> OffsetArray {
+fn permutate_graph(graph: &OffsetArray, perms: &[u64]) -> OffsetArray {
     let mut perm_edges: Vec<Vec<Edge>> = vec![Vec::new(); perms.len()];
 
     for (i, perm) in perms.iter().enumerate() {
@@ -188,7 +188,7 @@ impl<'a> Dijkstra<'a> {
 
             for i in self.graph.1[id as usize]..self.graph.1[id as usize + 1] {
                 let edge = self.graph.0[i as usize];
-                if self.distances[edge.0 as usize].map_or(true, |curr| weight + edge.1 < curr) {
+                if self.distances[edge.0 as usize].is_none_or(|curr| weight + edge.1 < curr) {
                     self.distances[edge.0 as usize] = Some(weight + edge.1);
                     self.heap.push(Distance::new(weight + edge.1, edge.0));
                     self.visited.push(edge.0);
@@ -206,7 +206,7 @@ fn read_query(filename: &str) -> Result<Vec<(u64, u64)>, Box<dyn Error>> {
 
     Ok(reader
         .lines()
-        .filter_map(Result::ok)
+        .map_while(Result::ok)
         .map(|line| line.trim().to_string())
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .filter_map(|line| {
@@ -277,6 +277,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut file = OpenOptions::new()
         .write(true)
         .create(true)
+        .truncate(true)
         .open("output.txt")?;
 
     let start = Instant::now();

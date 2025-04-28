@@ -144,8 +144,7 @@ struct CH<'a> {
     // t -> s
     incoming_graph: &'a OffsetArray,
     incoming_distances: Vec<Option<u64>>,
-    incoming_heap: BinaryHeap<Distance>,
-    incoming_visited: Vec<u64>
+    incoming_heap: BinaryHeap<Distance>
 }
 
 impl<'a> CH<'a> {
@@ -156,8 +155,7 @@ impl<'a> CH<'a> {
              visited: Vec::new(),
              incoming_graph,
              incoming_distances: vec![None; incoming_graph.1.len() - 1], 
-             incoming_heap: BinaryHeap::new(), 
-             incoming_visited: Vec::new()
+             incoming_heap: BinaryHeap::new()
         }
     }
 
@@ -165,23 +163,29 @@ impl<'a> CH<'a> {
         // Cleanup of previous run
         while let Some(node) = self.visited.pop() {
             self.distances[node as usize] = None;
-        }
-
-        while let Some(node) = self.incoming_visited.pop() {
             self.incoming_distances[node as usize] = None;
         }
+
         self.heap.clear();
         self.incoming_heap.clear();
 
-        while !self.heap.is_empty() || !self.incoming_heap.is_empty() {
-            if let Some(Distance { weight, id }) = self.heap.pop() {
-                if id == t {
-                    return Some(weight);
-                }
+        // Push s and t to heaps and set dists to 0
+        self.heap.push(Distance::new(0, s));
+        self.distances[s as usize] = Some(0);
+        self.visited.push(s);
 
+        self.incoming_heap.push(Distance::new(0, t));
+        self.incoming_distances[t as usize] = Some(0);
+        self.visited.push(t);
+
+
+        while !self.heap.is_empty() || !self.incoming_heap.is_empty() {
+            // Dijkstra from s
+            if let Some(Distance { weight, id }) = self.heap.pop() {
                 for i in self.graph.1[id as usize].offset..self.graph.1[id as usize + 1].offset {
                     let edge = &self.graph.0[i as usize];
-                    if self.distances[edge.to as usize].is_none_or(|curr| weight + edge.weight < curr) {
+                    if self.distances[edge.to as usize].is_none_or(|curr| weight + edge.weight < curr) && 
+                       self.graph.1[edge.to as usize].level >= self.graph.1[id as usize].level {
                         self.distances[edge.to as usize] = Some(weight + edge.weight);
                         self.heap.push(Distance::new(weight + edge.weight, edge.to));
                         self.visited.push(edge.to);
@@ -189,22 +193,33 @@ impl<'a> CH<'a> {
                 }
             }
 
+            // Dijkstra from t
             if let Some(Distance { weight, id }) = self.incoming_heap.pop() {
-                if id == t {
-                    return Some(weight);
-                }
-
-                for i in self.graph.1[id as usize].offset..self.graph.1[id as usize + 1].offset {
-                    let edge = &self.graph.0[i as usize];
-                    if self.distances[edge.to as usize].is_none_or(|curr| weight + edge.weight < curr) {
-                        self.distances[edge.to as usize] = Some(weight + edge.weight);
-                        self.heap.push(Distance::new(weight + edge.weight, edge.to));
+                for i in self.incoming_graph.1[id as usize].offset..self.incoming_graph.1[id as usize + 1].offset {
+                    let edge = &self.incoming_graph.0[i as usize];
+                    if self.incoming_distances[edge.to as usize].is_none_or(|curr| weight + edge.weight < curr) && 
+                       self.incoming_graph.1[edge.to as usize].level >= self.incoming_graph.1[id as usize].level {
+                        self.incoming_distances[edge.to as usize] = Some(weight + edge.weight);
+                        self.incoming_heap.push(Distance::new(weight + edge.weight, edge.to));
                         self.visited.push(edge.to);
                     }
                 }
             }
         }
-        None
+
+        println!("{}", self.visited.len());
+
+        // Get minimal connecting node
+        let mut distance: Option<u64> = None;
+        for v in &self.visited {
+            match (distance, self.distances[*v as usize], self.incoming_distances[*v as usize]) {
+                (None, Some(d0), Some(d1)) => distance = Some(d0 + d1),
+                (Some(d), Some(d0), Some(d1)) if d0 + d1 < d => distance = Some(d0 + d1),
+                _ => continue
+            }
+        }
+
+        distance
     }
 }
 
@@ -292,8 +307,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     let s = 377371;
     let t = 754742;
     match dijkstra.shortest_path(s, t) {
-        Some(dist) => print!("Found a shortest path from {s} to {t}: {dist}"),
-        None => print!("Did NOT find a path between {s} and {t}")
+        Some(dist) => println!("Found a shortest path from {s} to {t}: {dist}"),
+        None => println!("Did NOT find a path between {s} and {t}")
+    }
+
+    let mut ch = CH::new(&graph, &incoming_graph);
+    let s = 377371;
+    let t = 754742;
+    match ch.shortest_path(s, t) {
+        Some(dist) => println!("Found a shortest path from {s} to {t}: {dist}"),
+        None => println!("Did NOT find a path between {s} and {t}")
     }
 
     Ok(())

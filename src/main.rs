@@ -1,16 +1,14 @@
-use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::env;
+use std::fs::File;
+use std::io::{BufRead, BufReader, BufWriter};
 use std::error::Error;
 use std::time::Instant;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use rand::seq::SliceRandom;
-use rand::thread_rng;
-use rand::Rng;
-
 
 type Edge = (u64, u64);
 type OffsetArray = (Vec<Edge>, Vec<u64>);
+
 
 fn create_offset_array(adj_list: Vec<Vec<Edge>>) -> OffsetArray {
     let mut flat_edges = Vec::new();
@@ -42,8 +40,19 @@ fn parse_graph(filename: &str) -> Result<(OffsetArray, OffsetArray), Box<dyn Err
     let num_nodes: u64 = lines.next().ok_or("Missing number of nodes")?.parse()?;
     let num_edges: u64 = lines.next().ok_or("Missing number of edges")?.parse()?;
 
-    // Skip node definitions
-    lines.nth((num_nodes - 1) as usize).ok_or("Missing node lines")?;
+    // Parse nodes
+    for _ in 0..num_nodes {
+        let line = lines.next().ok_or("Missing edge line")?;
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        
+        if parts.len() != 6 {
+            return Err("Malformed node line".into());
+        }
+
+        // TODO
+        let level: u64 = parts[5].parse()?;
+    }
+    
 
     // Build adjacency lists
     let mut outgoing_edges: Vec<Vec<Edge>> = vec![Vec::new(); num_nodes as usize];
@@ -53,13 +62,15 @@ fn parse_graph(filename: &str) -> Result<(OffsetArray, OffsetArray), Box<dyn Err
         let line = lines.next().ok_or("Missing edge line")?;
         let parts: Vec<&str> = line.split_whitespace().collect();
 
-        if parts.len() < 3 {
+        if parts.len() != 7 {
             return Err("Malformed edge line".into());
         }
 
         let source: u64 = parts[0].parse()?;
         let target: u64 = parts[1].parse()?;
         let weight: u64 = parts[2].parse()?;
+        let edge_id_a: i64 = parts[5].parse()?;
+        let edge_id_b: i64 = parts[6].parse()?;
 
         outgoing_edges[source as usize].push((target, weight));
         incoming_edges[target as usize].push((source, weight));
@@ -70,65 +81,6 @@ fn parse_graph(filename: &str) -> Result<(OffsetArray, OffsetArray), Box<dyn Err
     assert_eq!(num_nodes as usize, outgoing.1.len() - 1);
     assert_eq!(num_edges as usize, outgoing.0.len());
     Ok((outgoing, incoming))
-}
-
-fn dfs(graph: &OffsetArray, incoming_graph: &OffsetArray, start: u64, visited: &mut [bool]) {
-    let mut stack = Vec::new();
-    stack.push(start);
-
-    while let Some(node) = stack.pop() {
-        let node = node as usize;
-        if visited[node] {
-            continue;
-        }
-
-        visited[node] = true;
-
-        // Traverse bidirectionally because we need weak comps
-        for i in graph.1[node]..graph.1[node + 1] {
-            let neighbor = graph.0[i as usize].0;
-            if !visited[neighbor as usize] {
-                stack.push(neighbor);
-            }
-        }
-
-        for i in incoming_graph.1[node]..incoming_graph.1[node + 1] {
-            let neighbor = incoming_graph.0[i as usize].0;
-            if !visited[neighbor as usize] {
-                stack.push(neighbor);
-            }
-        }
-    }
-}
-
-fn calc_weakly_connected_comps(graph: &OffsetArray, incoming_graph: &OffsetArray) -> usize {
-    let mut num_comps = 0;
-    let mut visited = vec![false; graph.1.len() - 1];
-
-    for node in 0..visited.len() {
-        if !visited[node] {
-            num_comps += 1;
-            dfs(graph, incoming_graph, node as u64, &mut visited);
-        }
-    }
-
-    num_comps
-}
-
-fn permutate_graph(graph: &OffsetArray, perms: &[u64]) -> OffsetArray {
-    let mut perm_edges: Vec<Vec<Edge>> = vec![Vec::new(); perms.len()];
-
-    for (i, perm) in perms.iter().enumerate() {
-        for j in graph.1[i]..graph.1[i + 1] {
-            let (target, weight) = graph.0[j as usize];
-            perm_edges[*perm as usize].push((perms[target as usize], weight));
-        }
-    }
-
-    let perm_graph = create_offset_array(perm_edges);
-    assert_eq!(perm_graph.0.len(), graph.0.len());
-    assert_eq!(perm_graph.1.len(), graph.1.len());
-    perm_graph
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -224,76 +176,19 @@ fn read_query(filename: &str) -> Result<Vec<(u64, u64)>, Box<dyn Error>> {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    // Question 1: Load the DMI graph
+    // Question 1
+
+    // Load graph with CH levels
+    let args: Vec<String> = env::args().collect();
+
+    let mut log = BufWriter::new(File::create("dump.txt").expect("Could not create log"));
+
     let start = Instant::now();
     println!("Started parsing...");
-    let (graph, incoming_graph) = parse_graph("graph.fmi")?;
+    let (graph, incoming_graph) = parse_graph("stgtregbz_ch.fmi")?;
     let duration = start.elapsed();
     println!("Loaded graph in {:.2?}", duration);
 
-    // Question 2: Calculate the weaky connected components
-    let start = Instant::now();
-    let num_comps = calc_weakly_connected_comps(&graph, &incoming_graph);
-    let duration = start.elapsed();
-    println!("#weakly coupled components: {num_comps} [{:.2?}]", duration);
-    //println!("{:?}", graph.1);
-
-    // Question 3: Randomly permutate the graph using a hash function and try question 2 again
-    let mut perms: Vec<u64> = (0..graph.1.len() - 1).map(|i| i as u64).collect();
-    let mut rng = thread_rng();
-    perms.shuffle(&mut rng);
-    let perm_graph = permutate_graph(&graph, &perms);
-    let perm_incoming_graph = permutate_graph(&incoming_graph, &perms);
-    let start = Instant::now();
-    let num_comps = calc_weakly_connected_comps(&perm_graph, &perm_incoming_graph);
-    let duration = start.elapsed();
-    println!("#weakly coupled components (perm): {num_comps} [{:.2?}]", duration);
-
-    // Question 4: Shortest path of 100 randomly chosen (s, t) pairs
-    let mut dijkstra = Dijkstra::new(&graph);
-    let mut s: u64 = rng.gen_range(0..graph.1.len() as u64 - 1);
-    let start = Instant::now();
-
-    for i in 0..100 {
-        let start = Instant::now();
-        let t: u64 = rng.gen_range(0..graph.1.len() as u64 - 1);
-        match dijkstra.shortest_path(s, t) {
-            Some(dist) => print!("Found a shortest path from {s} to {t}: {dist}"),
-            None => print!("Did NOT find a path between {s} and {t}")
-        }
-        let duration = start.elapsed();
-        println!(" [{:.2?}]", duration);
-
-        // Only change s every 10th step
-        if i % 10 == 0 {
-            s = rng.gen_range(0..graph.1.len() as u64 - 1);
-        }
-    }
-
-    let duration = start.elapsed();
-    println!("Needed {:.2?} for 100 random queries", duration);
-
-    // Question 6: Run Dijkstra on queries
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open("output.txt")?;
-
-    let start = Instant::now();
-    for query in read_query("queries.txt").unwrap() {
-        let query_start = Instant::now();
-        write!(file, "{} {} ", query.0, query.1)?;
-        match dijkstra.shortest_path(query.0, query.1) {
-            Some(dist) => write!(file, "{} ", dist)?,
-            None => write!(file, "INF ")?
-        }
-
-        let duration = query_start.elapsed();
-        writeln!(file, "{:.2?}", duration)?;
-    }
-    let duration = start.elapsed();
-    println!("Needed {:.2?} for queries.txt", duration);
 
     Ok(())
 }

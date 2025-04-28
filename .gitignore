@@ -1,3 +1,5 @@
 /target
 /inputs/germany.fmi
 output.txt
+stgtregbz_ch.fmi
+dump.txt

@@ -134,6 +134,80 @@ impl PartialOrd for Distance {
     }
 }
 
+struct CH<'a> {
+    // s -> t
+    graph: &'a OffsetArray,
+    distances: Vec<Option<u64>>,
+    heap: BinaryHeap<Distance>,
+    visited: Vec<u64>,
+
+    // t -> s
+    incoming_graph: &'a OffsetArray,
+    incoming_distances: Vec<Option<u64>>,
+    incoming_heap: BinaryHeap<Distance>,
+    incoming_visited: Vec<u64>
+}
+
+impl<'a> CH<'a> {
+    pub fn new(graph: &'a OffsetArray, incoming_graph: &'a OffsetArray) -> Self {
+        CH { graph, 
+             distances: vec![None; graph.1.len() - 1], 
+             heap: BinaryHeap::new(), 
+             visited: Vec::new(),
+             incoming_graph,
+             incoming_distances: vec![None; incoming_graph.1.len() - 1], 
+             incoming_heap: BinaryHeap::new(), 
+             incoming_visited: Vec::new()
+        }
+    }
+
+    pub fn shortest_path(&mut self, s: u64, t: u64) -> Option<u64> {
+        // Cleanup of previous run
+        while let Some(node) = self.visited.pop() {
+            self.distances[node as usize] = None;
+        }
+
+        while let Some(node) = self.incoming_visited.pop() {
+            self.incoming_distances[node as usize] = None;
+        }
+        self.heap.clear();
+        self.incoming_heap.clear();
+
+        while !self.heap.is_empty() || !self.incoming_heap.is_empty() {
+            if let Some(Distance { weight, id }) = self.heap.pop() {
+                if id == t {
+                    return Some(weight);
+                }
+
+                for i in self.graph.1[id as usize].offset..self.graph.1[id as usize + 1].offset {
+                    let edge = &self.graph.0[i as usize];
+                    if self.distances[edge.to as usize].is_none_or(|curr| weight + edge.weight < curr) {
+                        self.distances[edge.to as usize] = Some(weight + edge.weight);
+                        self.heap.push(Distance::new(weight + edge.weight, edge.to));
+                        self.visited.push(edge.to);
+                    }
+                }
+            }
+
+            if let Some(Distance { weight, id }) = self.incoming_heap.pop() {
+                if id == t {
+                    return Some(weight);
+                }
+
+                for i in self.graph.1[id as usize].offset..self.graph.1[id as usize + 1].offset {
+                    let edge = &self.graph.0[i as usize];
+                    if self.distances[edge.to as usize].is_none_or(|curr| weight + edge.weight < curr) {
+                        self.distances[edge.to as usize] = Some(weight + edge.weight);
+                        self.heap.push(Distance::new(weight + edge.weight, edge.to));
+                        self.visited.push(edge.to);
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
 struct Dijkstra<'a> {
     graph: &'a OffsetArray,
     distances: Vec<Option<u64>>,
@@ -147,7 +221,7 @@ impl<'a> Dijkstra<'a> {
     }
 
     pub fn shortest_path(&mut self, s: u64, t: u64) -> Option<u64> {
-        // Cleaup of previous run
+        // Cleanup of previous run
         while let Some(node) = self.visited.pop() {
             self.distances[node as usize] = None;
         }

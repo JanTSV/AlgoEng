@@ -6,23 +6,47 @@ use std::time::Instant;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-type Edge = (u64, u64);
-type OffsetArray = (Vec<Edge>, Vec<u64>);
+#[derive(Clone)]
+struct Edge {
+    to: u64,
+    weight: u64,
+    edge_id_a: Option<u64>,
+    edge_id_b: Option<u64>
+}
 
+impl Edge {
+    pub fn new(to: u64, weight: u64, edge_id_a: Option<u64>, edge_id_b: Option<u64>) -> Self {
+        Edge { to, weight, edge_id_a, edge_id_b}
+    } 
+}
 
-fn create_offset_array(adj_list: Vec<Vec<Edge>>) -> OffsetArray {
-    let mut flat_edges = Vec::new();
-    let mut offsets = Vec::with_capacity(adj_list.len() + 1);
+#[derive(Clone)]
+struct Node {
+    offset: u64,
+    level: u64
+}
+
+impl Node {
+    pub fn new(offset: u64, level: u64) -> Self {
+        Node { offset, level }
+    }
+}
+
+type OffsetArray = (Vec<Edge>, Vec<Node>);
+
+fn create_offset_array(adj_list: Vec<Vec<Edge>>, levels: &Vec<u64>) -> OffsetArray {
+    let mut flat_edges: Vec<Edge> = Vec::new();
+    let mut nodes: Vec<Node> = Vec::with_capacity(adj_list.len() + 1);
     let mut current_offset = 0u64;
 
-    offsets.push(current_offset);
-    for edges in adj_list {
+    nodes.push(Node::new(current_offset, 0));
+    for (i, edges) in adj_list.iter().enumerate() {
         current_offset += edges.len() as u64;
-        flat_edges.extend(edges);
-        offsets.push(current_offset);
+        flat_edges.extend(edges.clone());
+        nodes.push(Node::new(current_offset, levels[i]));
     }
 
-    (flat_edges, offsets)
+    (flat_edges, nodes)
 }
 
 fn parse_graph(filename: &str) -> Result<(OffsetArray, OffsetArray), Box<dyn Error>> {
@@ -41,6 +65,7 @@ fn parse_graph(filename: &str) -> Result<(OffsetArray, OffsetArray), Box<dyn Err
     let num_edges: u64 = lines.next().ok_or("Missing number of edges")?.parse()?;
 
     // Parse nodes
+    let mut levels: Vec<u64> = vec![];
     for _ in 0..num_nodes {
         let line = lines.next().ok_or("Missing edge line")?;
         let parts: Vec<&str> = line.split_whitespace().collect();
@@ -49,8 +74,8 @@ fn parse_graph(filename: &str) -> Result<(OffsetArray, OffsetArray), Box<dyn Err
             return Err("Malformed node line".into());
         }
 
-        // TODO
         let level: u64 = parts[5].parse()?;
+        levels.push(level);
     }
     
 
@@ -69,15 +94,15 @@ fn parse_graph(filename: &str) -> Result<(OffsetArray, OffsetArray), Box<dyn Err
         let source: u64 = parts[0].parse()?;
         let target: u64 = parts[1].parse()?;
         let weight: u64 = parts[2].parse()?;
-        let edge_id_a: i64 = parts[5].parse()?;
-        let edge_id_b: i64 = parts[6].parse()?;
+        let edge_id_a: Option<u64> = parts[5].parse().ok();
+        let edge_id_b: Option<u64> = parts[6].parse().ok();
 
-        outgoing_edges[source as usize].push((target, weight));
-        incoming_edges[target as usize].push((source, weight));
+        outgoing_edges[source as usize].push(Edge::new(target, weight, edge_id_a, edge_id_b));
+        incoming_edges[target as usize].push(Edge::new(source, weight, edge_id_b, edge_id_a));
     }
 
-    let outgoing = create_offset_array(outgoing_edges);
-    let incoming = create_offset_array(incoming_edges);
+    let outgoing = create_offset_array(outgoing_edges, &levels);
+    let incoming = create_offset_array(incoming_edges, &levels);
     assert_eq!(num_nodes as usize, outgoing.1.len() - 1);
     assert_eq!(num_edges as usize, outgoing.0.len());
     Ok((outgoing, incoming))
@@ -138,12 +163,12 @@ impl<'a> Dijkstra<'a> {
                 return Some(weight);
             }
 
-            for i in self.graph.1[id as usize]..self.graph.1[id as usize + 1] {
-                let edge = self.graph.0[i as usize];
-                if self.distances[edge.0 as usize].is_none_or(|curr| weight + edge.1 < curr) {
-                    self.distances[edge.0 as usize] = Some(weight + edge.1);
-                    self.heap.push(Distance::new(weight + edge.1, edge.0));
-                    self.visited.push(edge.0);
+            for i in self.graph.1[id as usize].offset..self.graph.1[id as usize + 1].offset {
+                let edge = &self.graph.0[i as usize];
+                if self.distances[edge.to as usize].is_none_or(|curr| weight + edge.weight < curr) {
+                    self.distances[edge.to as usize] = Some(weight + edge.weight);
+                    self.heap.push(Distance::new(weight + edge.weight, edge.to));
+                    self.visited.push(edge.to);
                 }
             }
         }
@@ -189,6 +214,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let duration = start.elapsed();
     println!("Loaded graph in {:.2?}", duration);
 
+    let mut dijkstra = Dijkstra::new(&graph);
+    let s = 377371;
+    let t = 754742;
+    match dijkstra.shortest_path(s, t) {
+        Some(dist) => print!("Found a shortest path from {s} to {t}: {dist}"),
+        None => print!("Did NOT find a path between {s} and {t}")
+    }
 
     Ok(())
 }

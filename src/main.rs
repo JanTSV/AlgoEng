@@ -328,3 +328,28 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+    use rand::{thread_rng, Rng};
+
+    #[test]
+    fn test_random_shortest_paths() {
+        let (graph, incoming_graph) = parse_graph("stgtregbz_ch.fmi").unwrap();
+        let mut dijkstra = Dijkstra::new(&graph);
+        let mut ch = CH::new(&graph, &incoming_graph);
+        
+        let mut rng = thread_rng();
+        let mut s: u64 = rng.gen_range(0..graph.1.len() as u64 - 1);
+        for i in 0..100 {
+            let t: u64 = rng.gen_range(0..graph.1.len() as u64 - 1);
+            assert_eq!(dijkstra.shortest_path(s, t), ch.shortest_path(s, t));
+    
+            // Only change s every 10th step
+            if i % 10 == 0 {
+                s = rng.gen_range(0..graph.1.len() as u64 - 1);
+            }
+        }
+    }
+}

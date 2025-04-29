@@ -2,6 +2,7 @@ use std::env;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter};
 use std::error::Error;
+use std::process::exit;
 use std::time::Instant;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
@@ -39,11 +40,12 @@ fn create_offset_array(adj_list: Vec<Vec<Edge>>, levels: &Vec<u64>) -> OffsetArr
     let mut nodes: Vec<Node> = Vec::with_capacity(adj_list.len() + 1);
     let mut current_offset = 0u64;
 
-    nodes.push(Node::new(current_offset, 0));
+    nodes.push(Node::new(current_offset, levels[0]));
+    assert_eq!(adj_list.len(), levels.len());
     for (i, edges) in adj_list.iter().enumerate() {
         current_offset += edges.len() as u64;
         flat_edges.extend(edges.clone());
-        nodes.push(Node::new(current_offset, levels[i]));
+        nodes.push(Node::new(current_offset, *levels.get(i + 1).unwrap_or(&0)));
     }
 
     (flat_edges, nodes)
@@ -184,6 +186,7 @@ impl<'a> CH<'a> {
             if let Some(Distance { weight, id }) = self.heap.pop() {
                 for i in self.graph.1[id as usize].offset..self.graph.1[id as usize + 1].offset {
                     let edge = &self.graph.0[i as usize];
+                    // println!("CURRENT: {} {} EDGE: {} {}", id, self.graph.1[id as usize].level, edge.to, self.graph.1[edge.to as usize].level);
                     if self.distances[edge.to as usize].is_none_or(|curr| weight + edge.weight < curr) && 
                        self.graph.1[edge.to as usize].level >= self.graph.1[id as usize].level {
                         self.distances[edge.to as usize] = Some(weight + edge.weight);
@@ -206,8 +209,6 @@ impl<'a> CH<'a> {
                 }
             }
         }
-
-        println!("{}", self.visited.len());
 
         // Get minimal connecting node
         let mut distance: Option<u64> = None;
@@ -293,8 +294,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Question 1
 
     // Load graph with CH levels
-    let args: Vec<String> = env::args().collect();
-
     let mut log = BufWriter::new(File::create("dump.txt").expect("Could not create log"));
 
     let start = Instant::now();
@@ -306,18 +305,26 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut dijkstra = Dijkstra::new(&graph);
     let s = 377371;
     let t = 754742;
+    print!("Dijkstra: ");
+    let start = Instant::now();
     match dijkstra.shortest_path(s, t) {
-        Some(dist) => println!("Found a shortest path from {s} to {t}: {dist}"),
-        None => println!("Did NOT find a path between {s} and {t}")
+        Some(dist) => print!("Found a shortest path from {s} to {t}: {dist} "),
+        None => print!("Did NOT find a path between {s} and {t} ")
     }
+    let duration = start.elapsed();
+    println!("[{:.2?}]", duration);
 
     let mut ch = CH::new(&graph, &incoming_graph);
     let s = 377371;
     let t = 754742;
+    print!("CH: ");
+    let start = Instant::now();
     match ch.shortest_path(s, t) {
-        Some(dist) => println!("Found a shortest path from {s} to {t}: {dist}"),
-        None => println!("Did NOT find a path between {s} and {t}")
+        Some(dist) => print!("Found a shortest path from {s} to {t}: {dist} "),
+        None => print!("Did NOT find a path between {s} and {t} ")
     }
+    let duration = start.elapsed();
+    println!("[{:.2?}]", duration);
 
     Ok(())
 }

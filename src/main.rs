@@ -34,24 +34,25 @@ impl Node {
 }
 
 type OffsetArray = (Vec<Edge>, Vec<Node>);
+type Level = (u64, u64);
 
-fn create_offset_array(adj_list: Vec<Vec<Edge>>, levels: &Vec<u64>) -> OffsetArray {
+fn create_offset_array(adj_list: Vec<Vec<Edge>>, levels: &Vec<Level>) -> OffsetArray {
     let mut flat_edges: Vec<Edge> = Vec::new();
     let mut nodes: Vec<Node> = Vec::with_capacity(adj_list.len() + 1);
     let mut current_offset = 0u64;
 
-    nodes.push(Node::new(current_offset, levels[0]));
+    nodes.push(Node::new(current_offset, levels[0].1));
     assert_eq!(adj_list.len(), levels.len());
     for (i, edges) in adj_list.iter().enumerate() {
         current_offset += edges.len() as u64;
         flat_edges.extend(edges.clone());
-        nodes.push(Node::new(current_offset, *levels.get(i + 1).unwrap_or(&0)));
+        nodes.push(Node::new(current_offset, levels.get(i + 1).map(|lvl| lvl.1).unwrap_or(0)));
     }
 
     (flat_edges, nodes)
 }
 
-fn parse_graph(filename: &str) -> Result<(OffsetArray, OffsetArray), Box<dyn Error>> {
+fn parse_graph(filename: &str) -> Result<(Vec<u64>, OffsetArray, OffsetArray), Box<dyn Error>> {
     let file = File::open(filename)?;
     let reader = BufReader::new(file);
 
@@ -67,8 +68,8 @@ fn parse_graph(filename: &str) -> Result<(OffsetArray, OffsetArray), Box<dyn Err
     let num_edges: u64 = lines.next().ok_or("Missing number of edges")?.parse()?;
 
     // Parse nodes
-    let mut levels: Vec<u64> = vec![];
-    for _ in 0..num_nodes {
+    let mut levels: Vec<Level> = vec![];
+    for _i in 0..num_nodes {
         let line = lines.next().ok_or("Missing edge line")?;
         let parts: Vec<&str> = line.split_whitespace().collect();
         
@@ -76,8 +77,10 @@ fn parse_graph(filename: &str) -> Result<(OffsetArray, OffsetArray), Box<dyn Err
             return Err("Malformed node line".into());
         }
 
+        let id: u64 = parts[0].parse()?;
+        assert_eq!(id, _i);
         let level: u64 = parts[5].parse()?;
-        levels.push(level);
+        levels.push((id, level));
     }
     
 
@@ -93,9 +96,9 @@ fn parse_graph(filename: &str) -> Result<(OffsetArray, OffsetArray), Box<dyn Err
             return Err("Malformed edge line".into());
         }
 
-        let source: u64 = parts[0].parse()?;
-        let target: u64 = parts[1].parse()?;
-        let weight: u64 = parts[2].parse()?;
+        let source: u64 = levels[parts[0].parse::<usize>()?].0;
+        let target: u64 = levels[parts[1].parse::<usize>()?].0;
+        let weight: u64 = levels[parts[2].parse::<usize>()?].0;
         let edge_id_a: Option<u64> = parts[5].parse().ok();
         let edge_id_b: Option<u64> = parts[6].parse().ok();
 
@@ -103,11 +106,43 @@ fn parse_graph(filename: &str) -> Result<(OffsetArray, OffsetArray), Box<dyn Err
         incoming_edges[target as usize].push(Edge::new(source, weight, edge_id_b, edge_id_a));
     }
 
-    let outgoing = create_offset_array(outgoing_edges, &levels);
-    let incoming = create_offset_array(incoming_edges, &levels);
+    // Sort nodes by level
+    levels.sort_by_key(|l| l.1);
+
+    // 1. Map original node IDs to new indices after sorting
+    let mut id_to_new_index = vec![0u64; levels.len()];
+    for (new_index, (old_id, _)) in levels.iter().enumerate() {
+        id_to_new_index[*old_id as usize] = new_index as u64;
+    }
+
+    // 2. Remap and reorder adjacency lists
+    let mut sorted_outgoing = vec![Vec::new(); levels.len()];
+    let mut sorted_incoming = vec![Vec::new(); levels.len()];
+    for (new_index, (old_id, _)) in levels.iter().enumerate() {
+        sorted_outgoing[new_index] = outgoing_edges[*old_id as usize]
+            .iter()
+            .map(|edge| {
+                let mut new_edge = edge.clone();
+                new_edge.to = id_to_new_index[edge.to as usize];
+                new_edge
+            })
+            .collect();
+
+        sorted_incoming[new_index] = incoming_edges[*old_id as usize]
+            .iter()
+            .map(|edge| {
+                let mut new_edge = edge.clone();
+                new_edge.to = id_to_new_index[edge.to as usize];
+                new_edge
+            })
+            .collect();
+    }
+
+    let outgoing = create_offset_array(sorted_outgoing, &levels);
+    let incoming = create_offset_array(sorted_incoming, &levels);
     assert_eq!(num_nodes as usize, outgoing.1.len() - 1);
     assert_eq!(num_edges as usize, outgoing.0.len());
-    Ok((outgoing, incoming))
+    Ok((id_to_new_index, outgoing, incoming))
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -179,7 +214,6 @@ impl<'a> CH<'a> {
         self.incoming_heap.push(Distance::new(0, t));
         self.incoming_distances[t as usize] = Some(0);
         self.visited.push(t);
-
 
         while !self.heap.is_empty() || !self.incoming_heap.is_empty() {
             // Dijkstra from s
@@ -298,7 +332,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let start = Instant::now();
     println!("Started parsing...");
-    let (graph, incoming_graph) = parse_graph("stgtregbz_ch.fmi")?;
+    let (perm, graph, incoming_graph) = parse_graph("stgtregbz_ch.fmi")?;
     let duration = start.elapsed();
     println!("Loaded graph in {:.2?}", duration);
 
@@ -307,7 +341,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let t = 754742;
     print!("Dijkstra: ");
     let start = Instant::now();
-    match dijkstra.shortest_path(s, t) {
+    match dijkstra.shortest_path(perm[s as usize], perm[t as usize]) {
         Some(dist) => print!("Found a shortest path from {s} to {t}: {dist} "),
         None => print!("Did NOT find a path between {s} and {t} ")
     }
@@ -319,7 +353,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let t = 754742;
     print!("CH: ");
     let start = Instant::now();
-    match ch.shortest_path(s, t) {
+    match ch.shortest_path(perm[s as usize], perm[t as usize]) {
         Some(dist) => print!("Found a shortest path from {s} to {t}: {dist} "),
         None => print!("Did NOT find a path between {s} and {t} ")
     }
@@ -336,15 +370,29 @@ mod tests {
 
     #[test]
     fn test_random_shortest_paths() {
-        let (graph, incoming_graph) = parse_graph("stgtregbz_ch.fmi").unwrap();
+        let (perm, graph, incoming_graph) = parse_graph("stgtregbz_ch.fmi").unwrap();
         let mut dijkstra = Dijkstra::new(&graph);
         let mut ch = CH::new(&graph, &incoming_graph);
         
         let mut rng = thread_rng();
         let mut s: u64 = rng.gen_range(0..graph.1.len() as u64 - 1);
+
         for i in 0..100 {
             let t: u64 = rng.gen_range(0..graph.1.len() as u64 - 1);
-            assert_eq!(dijkstra.shortest_path(s, t), ch.shortest_path(s, t));
+            
+            // Dijkstra
+            let start = Instant::now();
+            let d = dijkstra.shortest_path(perm[s as usize], perm[t as usize]);
+            let duration = start.elapsed();
+            println!("Dijkstra [{:.2?}]", duration);
+
+            // CH
+            let start = Instant::now();
+            let c = ch.shortest_path(perm[s as usize], perm[t as usize]);
+            let duration = start.elapsed();
+            println!("CH [{:.2?}]", duration);
+
+            assert_eq!(d, c);
     
             // Only change s every 10th step
             if i % 10 == 0 {

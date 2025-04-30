@@ -24,17 +24,17 @@ impl Edge {
 #[derive(Clone)]
 struct Node {
     offset: u64,
-    level: u64
+    level: Option<u64>
 }
 
 impl Node {
-    pub fn new(offset: u64, level: u64) -> Self {
+    pub fn new(offset: u64, level: Option<u64>) -> Self {
         Node { offset, level }
     }
 }
 
 type OffsetArray = (Vec<Edge>, Vec<Node>);
-type Level = (u64, u64);
+type Level = (u64, Option<u64>);
 
 fn create_offset_array(adj_list: Vec<Vec<Edge>>, levels: &Vec<Level>) -> OffsetArray {
     let mut flat_edges: Vec<Edge> = Vec::new();
@@ -46,7 +46,7 @@ fn create_offset_array(adj_list: Vec<Vec<Edge>>, levels: &Vec<Level>) -> OffsetA
     for (i, edges) in adj_list.iter().enumerate() {
         current_offset += edges.len() as u64;
         flat_edges.extend(edges.clone());
-        nodes.push(Node::new(current_offset, levels.get(i + 1).map(|lvl| lvl.1).unwrap_or(0)));
+        nodes.push(Node::new(current_offset, levels.get(i + 1).map(|lvl| lvl.1).unwrap_or(Some(0))));
     }
 
     (flat_edges, nodes)
@@ -73,13 +73,18 @@ fn parse_graph(filename: &str) -> Result<(Vec<u64>, OffsetArray, OffsetArray), B
         let line = lines.next().ok_or("Missing edge line")?;
         let parts: Vec<&str> = line.split_whitespace().collect();
         
-        if parts.len() != 6 {
-            return Err("Malformed node line".into());
+        if parts.len() < 5 {
+            return Err(format!("Malformed node line {}, parts: {}", line, parts.len()).into());
         }
 
         let id: u64 = parts[0].parse()?;
         assert_eq!(id, _i);
-        let level: u64 = parts[5].parse()?;
+        let level: Option<u64> = if parts.len() >= 6 {
+            parts[5].parse::<u64>().ok()
+        } else {
+            None
+        };
+
         levels.push((id, level));
     }
     
@@ -92,15 +97,23 @@ fn parse_graph(filename: &str) -> Result<(Vec<u64>, OffsetArray, OffsetArray), B
         let line = lines.next().ok_or("Missing edge line")?;
         let parts: Vec<&str> = line.split_whitespace().collect();
 
-        if parts.len() != 7 {
-            return Err("Malformed edge line".into());
+        if parts.len() < 3 {
+            return Err(format!("Malformed edge line {}, parts: {}", line, parts.len()).into());
         }
 
         let source: u64 = levels[parts[0].parse::<usize>()?].0;
         let target: u64 = levels[parts[1].parse::<usize>()?].0;
         let weight: u64 = levels[parts[2].parse::<usize>()?].0;
-        let edge_id_a: Option<u64> = parts[5].parse().ok();
-        let edge_id_b: Option<u64> = parts[6].parse().ok();
+        let edge_id_a: Option<u64> = if parts.len() > 5 {
+            parts[5].parse().ok()
+        } else {
+            None
+        };
+        let edge_id_b: Option<u64> = if parts.len() > 6 {
+            parts[6].parse().ok()
+        } else {
+            None
+        };
 
         outgoing_edges[source as usize].push(Edge::new(target, weight, edge_id_a, edge_id_b));
         incoming_edges[target as usize].push(Edge::new(source, weight, edge_id_b, edge_id_a));
@@ -392,6 +405,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Loaded graph in {:.2?}", duration);
 
     let mut dijkstra = Dijkstra::new(&graph);
+    // let s = 214733;
+    // let t = 429466;
     let s = 377371;
     let t = 754742;
     print!("Dijkstra: ");
@@ -404,8 +419,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("[{:.2?}]", duration);
 
     let mut ch = CH::new(&graph, &incoming_graph);
-    let s = 377371;
-    let t = 754742;
+   
     print!("CH: ");
     let start = Instant::now();
     match ch.shortest_path(perm[s as usize], perm[t as usize]) {

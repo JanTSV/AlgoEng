@@ -7,7 +7,7 @@ use std::time::Instant;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct Edge {
     to: u64,
     weight: u64,
@@ -21,7 +21,7 @@ impl Edge {
     } 
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct Node {
     offset: u64,
     level: Option<u64>
@@ -324,7 +324,61 @@ impl<'a> CH<'a> {
 
         distance
     }
+
+    pub fn preprocessing(graph: &mut OffsetArray) {
+        // TODO: Preprocessing needs to be called on every weak component
+        // Use dfs to reach weack components and call sub function on this comp
+        // dfs() needs to return list of nodes in component (Independent set)
+        // Sort independent set by edge-difference (#shortcuts created - #edges deleted)
+        // Contract nodes (u) in that order with Dijkstras (shortcuts only if Dijkstra(neighbor_i, neighbor_j)
+        //  > c(u, neighbor_i) + c(u, neighbor_j). i and j are edgeA and edgeB
+
+    }
 }
+
+fn dfs(graph: &OffsetArray, incoming_graph: &OffsetArray, start: u64, visited: &mut [bool]) {
+    let mut stack = Vec::new();
+    stack.push(start);
+
+    while let Some(node) = stack.pop() {
+        let node = node as usize;
+        if visited[node] {
+            continue;
+        }
+
+        visited[node] = true;
+
+        // Traverse bidirectionally because we need weak comps
+        for i in graph.1[node].offset..graph.1[node + 1].offset {
+            let neighbor = graph.0[i as usize].to;
+            if !visited[neighbor as usize] {
+                stack.push(neighbor);
+            }
+        }
+
+        for i in incoming_graph.1[node].offset..incoming_graph.1[node + 1].offset {
+            let neighbor = incoming_graph.0[i as usize].to;
+            if !visited[neighbor as usize] {
+                stack.push(neighbor);
+            }
+        }
+    }
+}
+
+fn calc_weakly_connected_comps(graph: &OffsetArray, incoming_graph: &OffsetArray) -> usize {
+    let mut num_comps = 0;
+    let mut visited = vec![false; graph.1.len() - 1];
+
+    for node in 0..visited.len() {
+        if !visited[node] {
+            num_comps += 1;
+            dfs(graph, incoming_graph, node as u64, &mut visited);
+        }
+    }
+
+    num_comps
+}
+
 
 struct Dijkstra<'a> {
     graph: &'a OffsetArray,
@@ -400,9 +454,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let start = Instant::now();
     println!("Started parsing...");
-    let (perm, graph, incoming_graph) = parse_graph("stgtregbz_ch.fmi")?;
+    let (perm, graph, incoming_graph) = parse_graph("inputs/MV.fmi")?;
     let duration = start.elapsed();
     println!("Loaded graph in {:.2?}", duration);
+
+    println!("{:?}", graph.0[0]);
+    exit(0);
+
+    // println!("Weakly connected components: {}", calc_weakly_connected_comps(&graph, &incoming_graph));
 
     let mut dijkstra = Dijkstra::new(&graph);
     // let s = 214733;

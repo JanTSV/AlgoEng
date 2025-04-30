@@ -196,6 +196,51 @@ impl<'a> CH<'a> {
         }
     }
 
+    fn should_stall_forward(&self, node: u64) -> bool {
+        let node_level = self.graph.1[node as usize].level;
+        let node_dist = match self.distances[node as usize] {
+            Some(d) => d,
+            None => return false,
+        };
+
+        for i in self.incoming_graph.1[node as usize].offset..self.incoming_graph.1[node as usize + 1].offset {
+            let edge = &self.incoming_graph.0[i as usize];
+            let neighbor_level = self.graph.1[edge.to as usize].level;
+
+            // Only consider neighbors with higher level
+            if neighbor_level > node_level {
+                if let Some(alt_dist) = self.distances[edge.to as usize] {
+                    if alt_dist + edge.weight < node_dist {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn should_stall_backward(&self, node: u64) -> bool {
+        let node_level = self.incoming_graph.1[node as usize].level;
+        let node_dist = match self.incoming_distances[node as usize] {
+            Some(d) => d,
+            None => return false,
+        };
+
+        for i in self.graph.1[node as usize].offset..self.graph.1[node as usize + 1].offset {
+            let edge = &self.graph.0[i as usize];
+            let neighbor_level = self.incoming_graph.1[edge.to as usize].level;
+
+            if neighbor_level > node_level {
+                if let Some(alt_dist) = self.incoming_distances[edge.to as usize] {
+                    if alt_dist + edge.weight < node_dist {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
     pub fn shortest_path(&mut self, s: u64, t: u64) -> Option<u64> {
         // Cleanup of previous run
         while let Some(node) = self.visited.pop() {
@@ -218,6 +263,11 @@ impl<'a> CH<'a> {
         while !self.heap.is_empty() || !self.incoming_heap.is_empty() {
             // Dijkstra from s
             if let Some(Distance { weight, id }) = self.heap.pop() {
+                // Stall-on-demand
+                if self.should_stall_forward(id) {
+                    continue;
+                }
+
                 for i in self.graph.1[id as usize].offset..self.graph.1[id as usize + 1].offset {
                     let edge = &self.graph.0[i as usize];
                     // println!("CURRENT: {} {} EDGE: {} {}", id, self.graph.1[id as usize].level, edge.to, self.graph.1[edge.to as usize].level);
@@ -232,6 +282,11 @@ impl<'a> CH<'a> {
 
             // Dijkstra from t
             if let Some(Distance { weight, id }) = self.incoming_heap.pop() {
+                // Stall-on-demand
+                if self.should_stall_backward(id) {
+                    continue;
+                }
+
                 for i in self.incoming_graph.1[id as usize].offset..self.incoming_graph.1[id as usize + 1].offset {
                     let edge = &self.incoming_graph.0[i as usize];
                     if self.incoming_distances[edge.to as usize].is_none_or(|curr| weight + edge.weight < curr) && 

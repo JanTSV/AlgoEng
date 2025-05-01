@@ -254,7 +254,7 @@ impl<'a> CH<'a> {
         false
     }
 
-    pub fn shortest_path(&mut self, s: u64, t: u64) -> Option<u64> {
+    pub fn shortest_path(&mut self, s: u64, t: u64, stall_on_demand: bool) -> Option<u64> {
         // Cleanup of previous run
         while let Some(node) = self.visited.pop() {
             self.distances[node as usize] = None;
@@ -277,7 +277,7 @@ impl<'a> CH<'a> {
             // Dijkstra from s
             if let Some(Distance { weight, id }) = self.heap.pop() {
                 // Stall-on-demand
-                if self.should_stall_forward(id) {
+                if stall_on_demand && self.should_stall_forward(id) {
                     continue;
                 }
 
@@ -296,7 +296,7 @@ impl<'a> CH<'a> {
             // Dijkstra from t
             if let Some(Distance { weight, id }) = self.incoming_heap.pop() {
                 // Stall-on-demand
-                if self.should_stall_backward(id) {
+                if stall_on_demand && self.should_stall_backward(id) {
                     continue;
                 }
 
@@ -325,9 +325,9 @@ impl<'a> CH<'a> {
         distance
     }
 
-    pub fn preprocessing(graph: &mut OffsetArray) {
+    pub fn preprocess(graph: &mut OffsetArray) {
         // TODO: Preprocessing needs to be called on every weak component
-        // Use dfs to reach weack components and call sub function on this comp
+        // Use dfs to reach weak components and call sub function on this comp
         // dfs() needs to return list of nodes in component (Independent set)
         // Sort independent set by edge-difference (#shortcuts created - #edges deleted)
         // Contract nodes (u) in that order with Dijkstras (shortcuts only if Dijkstra(neighbor_i, neighbor_j)
@@ -454,15 +454,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let start = Instant::now();
     println!("Started parsing...");
-    let (perm, graph, incoming_graph) = parse_graph("inputs/MV.fmi")?;
+    let (perm, graph, incoming_graph) = parse_graph("stgtregbz_ch.fmi")?;
     let duration = start.elapsed();
     println!("Loaded graph in {:.2?}", duration);
 
-    println!("{:?}", graph.0[0]);
-    exit(0);
-
-    // println!("Weakly connected components: {}", calc_weakly_connected_comps(&graph, &incoming_graph));
-
+    // Test Dijkstra vs CH
     let mut dijkstra = Dijkstra::new(&graph);
     // let s = 214733;
     // let t = 429466;
@@ -479,9 +475,18 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut ch = CH::new(&graph, &incoming_graph);
    
-    print!("CH: ");
+    print!("CH (without stall-on-demand): ");
     let start = Instant::now();
-    match ch.shortest_path(perm[s as usize], perm[t as usize]) {
+    match ch.shortest_path(perm[s as usize], perm[t as usize], false) {
+        Some(dist) => print!("Found a shortest path from {s} to {t}: {dist} "),
+        None => print!("Did NOT find a path between {s} and {t} ")
+    }
+    let duration = start.elapsed();
+    println!("[{:.2?}]", duration);
+
+    print!("CH (with stall-on-demand): ");
+    let start = Instant::now();
+    match ch.shortest_path(perm[s as usize], perm[t as usize], true) {
         Some(dist) => print!("Found a shortest path from {s} to {t}: {dist} "),
         None => print!("Did NOT find a path between {s} and {t} ")
     }
@@ -516,7 +521,7 @@ mod tests {
 
             // CH
             let start = Instant::now();
-            let c = ch.shortest_path(perm[s as usize], perm[t as usize]);
+            let c = ch.shortest_path(perm[s as usize], perm[t as usize], true);
             let duration = start.elapsed();
             println!("CH [{:.2?}]", duration);
 

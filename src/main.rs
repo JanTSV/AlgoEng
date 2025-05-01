@@ -296,6 +296,12 @@ impl<'a> CH<'a> {
         distance
     }
 
+    fn compute_edge_difference(node: u64, graph: &Graph) -> i64 {
+        let max_shortcuts_created = Self::max_shortcuts_created(node, graph);
+        let edges_deleted = Self::calc_edges_deleted(node, graph);
+        max_shortcuts_created as i64 - edges_deleted as i64
+    }
+
     pub fn preprocess(graph: &mut Graph) {
         let l = graph.nodes.len();
         let mut visited = vec![false; l];
@@ -311,9 +317,7 @@ impl<'a> CH<'a> {
 
                 // Sort subgraph by increasing #max shortcuts created - #edges deleted
                 subgraph.sort_by_key(|node| {
-                    let max_shortcuts_created = Self::max_shortcuts_created(*node, graph);
-                    let edges_deleted = Self::calc_edges_deleted(*node, graph);
-                    max_shortcuts_created as i64 - edges_deleted as i64
+                    Self::compute_edge_difference(*node, graph)
                 });
 
                 // Iterate over sorted subgraph and contract nodes
@@ -345,6 +349,111 @@ impl<'a> CH<'a> {
         }
 
         println!("number_added_shortcuts: {}", number_added_shortcuts);
+    }
+
+    fn find_independent_set(graph: &Graph, contracted: &Vec<bool>) -> Vec<u64> {
+        let mut independent_set = Vec::new();
+        let mut blocked = vec![false; graph.nodes.len()];
+    
+        for node in 0..graph.nodes.len() {
+            if contracted[node] || blocked[node] {
+                continue;
+            }
+    
+            independent_set.push(node as u64);
+            // Block its neighbors from being selected
+            for edge in &graph.edges[node] {
+                blocked[edge.to as usize] = true;
+            }
+            for edge in &graph.adj_edges[node] {
+                blocked[edge.to as usize] = true;
+            }
+        }
+    
+        independent_set
+    }
+
+    fn contract_independent_set(
+        graph: &mut Graph,
+        dijkstra: &mut Dijkstra,
+        indep_set: Vec<u64>,
+        level: u64,
+        threshold: i64,
+    ) -> usize {
+        let mut num_contracted = 0;
+    
+        for &node in &indep_set {
+            num_contracted += Self::contract_node(node, graph, dijkstra, level, threshold);
+        }
+    
+        num_contracted
+    }
+
+    fn contract_node(node: u64,
+        graph: &mut Graph,
+        dijkstra: &mut Dijkstra,
+        level: u64,
+        threshold: i64) -> usize {
+            let mut num_contracted = 0;
+            let diff = Self::compute_edge_difference(node, graph);
+            if diff <= threshold {
+                let shortcuts = Self::calc_shortcuts(node, graph, dijkstra);
+                for (from, to, weight, edge_id_a, edge_id_b) in shortcuts {
+                    graph.edges[from as usize].push(Edge::new(to, weight, Some(edge_id_a), Some(edge_id_b)));
+                    graph.adj_edges[to as usize].push(Edge::new(from, weight, Some(edge_id_a), Some(edge_id_b)));
+                }
+    
+                graph.nodes[node as usize].level = Some(level);
+                graph.nodes[node as usize].contracted = true;
+                num_contracted += 1;
+            }
+            num_contracted
+        }
+
+    fn batch_preprocess(graph: &mut Graph) {
+        let mut dijkstra = Dijkstra::unsafe_new(graph);
+        let mut level = 0;
+        let mut contracted = vec![false; graph.nodes.len()];
+        let mut overall_contracted = 0;
+        const THRESHOLD: i64 = 1;
+    
+        while contracted.iter().any(|&c| !c) {
+            // println!("{} / {}", _i, contracted.len());
+            let indep_set = Self::find_independent_set(graph, &contracted);
+            if indep_set.is_empty() {
+                break;
+            }
+    
+            let num_contracted = Self::contract_independent_set(graph, &mut dijkstra, indep_set, level, THRESHOLD);
+            if num_contracted == 0 {
+                // Increase threshold for new iteration
+                break;
+            }
+
+            overall_contracted += num_contracted;
+    
+            // Update global contracted vector
+            for node in 0..graph.nodes.len() {
+                contracted[node] = graph.nodes[node].contracted;
+            }
+    
+            level += 1;
+        }
+
+        // If there are still uncontracted nodes
+        // then there cannot be a new independet set.
+        // Since they are not independent, contract them one by one
+        let remaining_nodes: Vec<u64> = (0..graph.nodes.len())
+            .filter(|&node| !graph.nodes[node].contracted)
+            .map(|node| node as u64)
+            .collect();
+
+        for node in remaining_nodes {
+            overall_contracted += Self::contract_node(node, graph, &mut dijkstra, level, THRESHOLD);
+            level += 1;
+        }
+
+        println!("#contracted: {}", overall_contracted);
     }
 
     fn calc_shortcuts(node: u64, graph: &mut Graph, dijkstra: &mut Dijkstra) -> Vec<Shortcut> {
@@ -544,9 +653,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         let duration = start.elapsed();
         println!("[{:.2?}]", duration);
     }
-    // Task 2: Run own CH preprocessing
+    // Task 2
     
-    // TODO: IDK remove this or hmm
+    // Run own CH preprocessing
     let start = Instant::now();
     println!("Started parsing...");
     let (prep_perm, mut prep_graph) = parse_graph("inputs/MV.fmi")?;
@@ -555,9 +664,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let start = Instant::now();
     println!("Starting CH preprocessing...");
-    CH::preprocess(&mut prep_graph);
+    CH::batch_preprocess(&mut prep_graph);
     let duration = start.elapsed();
     println!("Preprocessed in {:.2?}", duration);
+    
 
 
     Ok(())

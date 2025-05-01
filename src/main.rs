@@ -23,36 +23,33 @@ impl Edge {
 
 #[derive(Debug, Clone)]
 struct Node {
-    offset: u64,
+    id: u64,
     level: Option<u64>
 }
 
 impl Node {
-    pub fn new(offset: u64, level: Option<u64>) -> Self {
-        Node { offset, level }
+    pub fn new(id: u64, level: Option<u64>) -> Self {
+        Node { id, level }
     }
 }
 
-type OffsetArray = (Vec<Edge>, Vec<Node>);
+struct Graph {
+    edges: Vec<Vec<Edge>>,
+    adj_edges: Vec<Vec<Edge>>,
+    nodes: Vec<Node>
+}
+
+impl Graph {
+    pub fn new(edges: Vec<Vec<Edge>>, adj_edges: Vec<Vec<Edge>>, nodes: Vec<Node>) -> Self {
+        assert_eq!(edges.len(), adj_edges.len());
+        assert_eq!(nodes.len(), edges.len());
+        Graph { edges, adj_edges, nodes }
+    }
+}
+
 type Level = (u64, Option<u64>);
 
-fn create_offset_array(adj_list: Vec<Vec<Edge>>, levels: &Vec<Level>) -> OffsetArray {
-    let mut flat_edges: Vec<Edge> = Vec::new();
-    let mut nodes: Vec<Node> = Vec::with_capacity(adj_list.len() + 1);
-    let mut current_offset = 0u64;
-
-    nodes.push(Node::new(current_offset, levels[0].1));
-    assert_eq!(adj_list.len(), levels.len());
-    for (i, edges) in adj_list.iter().enumerate() {
-        current_offset += edges.len() as u64;
-        flat_edges.extend(edges.clone());
-        nodes.push(Node::new(current_offset, levels.get(i + 1).map(|lvl| lvl.1).unwrap_or(Some(0))));
-    }
-
-    (flat_edges, nodes)
-}
-
-fn parse_graph(filename: &str) -> Result<(Vec<u64>, OffsetArray, OffsetArray), Box<dyn Error>> {
+fn parse_graph(filename: &str) -> Result<(Vec<u64>, Graph), Box<dyn Error>> {
     let file = File::open(filename)?;
     let reader = BufReader::new(file);
 
@@ -68,7 +65,7 @@ fn parse_graph(filename: &str) -> Result<(Vec<u64>, OffsetArray, OffsetArray), B
     let num_edges: u64 = lines.next().ok_or("Missing number of edges")?.parse()?;
 
     // Parse nodes
-    let mut levels: Vec<Level> = vec![];
+    let mut nodes: Vec<Node> = vec![];
     for _i in 0..num_nodes {
         let line = lines.next().ok_or("Missing edge line")?;
         let parts: Vec<&str> = line.split_whitespace().collect();
@@ -85,13 +82,22 @@ fn parse_graph(filename: &str) -> Result<(Vec<u64>, OffsetArray, OffsetArray), B
             None
         };
 
-        levels.push((id, level));
+        nodes.push(Node::new(id, level));
     }
     
+    // Sort nodes by level
+    nodes.sort_by_key(|node: &Node| node.level);
+    
+    // Map original node IDs to new indices after sorting
+    let mut id_to_new_index = vec![0u64; nodes.len()];
+    for (new_index, Node {id: old_id, level: _}) in nodes.iter().enumerate() {
+        id_to_new_index[*old_id as usize] = new_index as u64;
+    }
+
 
     // Build adjacency lists
-    let mut outgoing_edges: Vec<Vec<Edge>> = vec![Vec::new(); num_nodes as usize];
-    let mut incoming_edges: Vec<Vec<Edge>> = vec![Vec::new(); num_nodes as usize];
+    let mut edges: Vec<Vec<Edge>> = vec![Vec::new(); num_nodes as usize];
+    let mut adj_edges: Vec<Vec<Edge>> = vec![Vec::new(); num_nodes as usize];
 
     for _ in 0..num_edges {
         let line = lines.next().ok_or("Missing edge line")?;
@@ -101,8 +107,8 @@ fn parse_graph(filename: &str) -> Result<(Vec<u64>, OffsetArray, OffsetArray), B
             return Err(format!("Malformed edge line {}, parts: {}", line, parts.len()).into());
         }
 
-        let source: u64 = levels[parts[0].parse::<usize>()?].0;
-        let target: u64 = levels[parts[1].parse::<usize>()?].0;
+        let source: u64 = parts[0].parse()?;
+        let target: u64 = parts[1].parse()?;
         let weight: u64 = parts[2].parse()?;
         let edge_id_a: Option<u64> = if parts.len() > 5 {
             parts[5].parse().ok()
@@ -115,47 +121,15 @@ fn parse_graph(filename: &str) -> Result<(Vec<u64>, OffsetArray, OffsetArray), B
             None
         };
 
-        outgoing_edges[source as usize].push(Edge::new(target, weight, edge_id_a, edge_id_b));
-        incoming_edges[target as usize].push(Edge::new(source, weight, edge_id_b, edge_id_a));
+        // Add to correct sorted node
+        let source = id_to_new_index[source as usize];
+        let target = id_to_new_index[target as usize];
+
+        edges[source as usize].push(Edge::new(target, weight, edge_id_a, edge_id_b));
+        adj_edges[target as usize].push(Edge::new(source, weight, edge_id_b, edge_id_a));
     }
 
-    // Sort nodes by level
-    levels.sort_by_key(|l| l.1);
-
-    // 1. Map original node IDs to new indices after sorting
-    let mut id_to_new_index = vec![0u64; levels.len()];
-    for (new_index, (old_id, _)) in levels.iter().enumerate() {
-        id_to_new_index[*old_id as usize] = new_index as u64;
-    }
-
-    // 2. Remap and reorder adjacency lists
-    let mut sorted_outgoing = vec![Vec::new(); levels.len()];
-    let mut sorted_incoming = vec![Vec::new(); levels.len()];
-    for (new_index, (old_id, _)) in levels.iter().enumerate() {
-        sorted_outgoing[new_index] = outgoing_edges[*old_id as usize]
-            .iter()
-            .map(|edge| {
-                let mut new_edge = edge.clone();
-                new_edge.to = id_to_new_index[edge.to as usize];
-                new_edge
-            })
-            .collect();
-
-        sorted_incoming[new_index] = incoming_edges[*old_id as usize]
-            .iter()
-            .map(|edge| {
-                let mut new_edge = edge.clone();
-                new_edge.to = id_to_new_index[edge.to as usize];
-                new_edge
-            })
-            .collect();
-    }
-
-    let outgoing = create_offset_array(sorted_outgoing, &levels);
-    let incoming = create_offset_array(sorted_incoming, &levels);
-    assert_eq!(num_nodes as usize, outgoing.1.len() - 1);
-    assert_eq!(num_edges as usize, outgoing.0.len());
-    Ok((id_to_new_index, outgoing, incoming))
+    Ok((id_to_new_index, Graph::new(edges, adj_edges, nodes)))
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -187,40 +161,38 @@ impl PartialOrd for Distance {
 type Shortcut = (u64, u64, u64, u64, u64);
 
 struct CH<'a> {
+    graph: &'a Graph,
+
     // s -> t
-    graph: &'a OffsetArray,
     distances: Vec<Option<u64>>,
     heap: BinaryHeap<Distance>,
     visited: Vec<u64>,
 
     // t -> s
-    incoming_graph: &'a OffsetArray,
     incoming_distances: Vec<Option<u64>>,
     incoming_heap: BinaryHeap<Distance>
 }
 
 impl<'a> CH<'a> {
-    pub fn new(graph: &'a OffsetArray, incoming_graph: &'a OffsetArray) -> Self {
+    pub fn new(graph: &'a Graph) -> Self {
         CH { graph, 
-             distances: vec![None; graph.1.len() - 1], 
+             distances: vec![None; graph.nodes.len()], 
              heap: BinaryHeap::new(), 
              visited: Vec::new(),
-             incoming_graph,
-             incoming_distances: vec![None; incoming_graph.1.len() - 1], 
+             incoming_distances: vec![None; graph.nodes.len()], 
              incoming_heap: BinaryHeap::new()
         }
     }
 
     fn should_stall_forward(&self, node: u64) -> bool {
-        let node_level = self.graph.1[node as usize].level;
+        let node_level = self.graph.nodes[node as usize].level;
         let node_dist = match self.distances[node as usize] {
             Some(d) => d,
             None => return false,
         };
 
-        for i in self.incoming_graph.1[node as usize].offset..self.incoming_graph.1[node as usize + 1].offset {
-            let edge = &self.incoming_graph.0[i as usize];
-            let neighbor_level = self.graph.1[edge.to as usize].level;
+        for edge in &self.graph.adj_edges[node as usize] {
+            let neighbor_level = self.graph.nodes[edge.to as usize].level;
 
             // Only consider neighbors with higher level
             if neighbor_level > node_level {
@@ -235,15 +207,14 @@ impl<'a> CH<'a> {
     }
 
     fn should_stall_backward(&self, node: u64) -> bool {
-        let node_level = self.incoming_graph.1[node as usize].level;
+        let node_level = self.graph.nodes[node as usize].level;
         let node_dist = match self.incoming_distances[node as usize] {
             Some(d) => d,
             None => return false,
         };
 
-        for i in self.graph.1[node as usize].offset..self.graph.1[node as usize + 1].offset {
-            let edge = &self.graph.0[i as usize];
-            let neighbor_level = self.incoming_graph.1[edge.to as usize].level;
+        for edge in &self.graph.edges[node as usize] {
+            let neighbor_level = self.graph.nodes[edge.to as usize].level;
 
             if neighbor_level > node_level {
                 if let Some(alt_dist) = self.incoming_distances[edge.to as usize] {
@@ -283,11 +254,10 @@ impl<'a> CH<'a> {
                     continue;
                 }
 
-                for i in self.graph.1[id as usize].offset..self.graph.1[id as usize + 1].offset {
-                    let edge = &self.graph.0[i as usize];
+                for edge in &self.graph.edges[id as usize] {
                     // println!("CURRENT: {} {} EDGE: {} {}", id, self.graph.1[id as usize].level, edge.to, self.graph.1[edge.to as usize].level);
                     if self.distances[edge.to as usize].is_none_or(|curr| weight + edge.weight < curr) && 
-                       self.graph.1[edge.to as usize].level >= self.graph.1[id as usize].level {
+                       self.graph.nodes[edge.to as usize].level >= self.graph.nodes[id as usize].level {
                         self.distances[edge.to as usize] = Some(weight + edge.weight);
                         self.heap.push(Distance::new(weight + edge.weight, edge.to));
                         self.visited.push(edge.to);
@@ -302,10 +272,9 @@ impl<'a> CH<'a> {
                     continue;
                 }
 
-                for i in self.incoming_graph.1[id as usize].offset..self.incoming_graph.1[id as usize + 1].offset {
-                    let edge = &self.incoming_graph.0[i as usize];
+                for edge in &self.graph.adj_edges[id as usize] {
                     if self.incoming_distances[edge.to as usize].is_none_or(|curr| weight + edge.weight < curr) && 
-                       self.incoming_graph.1[edge.to as usize].level >= self.incoming_graph.1[id as usize].level {
+                       self.graph.nodes[edge.to as usize].level >= self.graph.nodes[id as usize].level {
                         self.incoming_distances[edge.to as usize] = Some(weight + edge.weight);
                         self.incoming_heap.push(Distance::new(weight + edge.weight, edge.to));
                         self.visited.push(edge.to);
@@ -327,45 +296,41 @@ impl<'a> CH<'a> {
         distance
     }
 
-    pub fn preprocess(graph: &mut OffsetArray, incoming_graph: &mut OffsetArray, perm: &Vec<u64>) {
-        let l = graph.1.len() - 1;
+    pub fn preprocess(graph: &mut Graph, perm: &Vec<u64>) {
+        let l = graph.nodes.len();
         let mut visited = vec![false; l];
         let mut contracted = vec![false; l];
         let mut number_added_shortcuts = 0;
-        let mut dijkstra = Dijkstra::unsafe_new(graph as *const OffsetArray); // Create Dijkstra instance here
+        let mut dijkstra = Dijkstra::unsafe_new(graph as *const Graph); // Create Dijkstra instance here
 
         for node in 0..l {
             println!("Preprocessing at {} out of {}: [{}%]", node, l, (node * 100) / l);
 
             if !visited[node] {
                 let mut level = 0;
-                let mut subgraph = Self::dfs(graph, incoming_graph, node as u64, &mut visited);
+                let mut subgraph = Self::dfs(graph, node as u64, &mut visited);
 
                 // Sort subgraph by increasing #max shortcuts created - #edges deleted
                 subgraph.sort_by_key(|node| {
-                    let max_shortcuts_created = Self::max_shortcuts_created(*node, graph, incoming_graph);
-                    let edges_deleted = Self::calc_edges_deleted(*node, graph, incoming_graph);
+                    let max_shortcuts_created = Self::max_shortcuts_created(*node, graph);
+                    let edges_deleted = Self::calc_edges_deleted(*node, graph);
                     max_shortcuts_created as i64 - edges_deleted as i64
                 });
 
                 // Iterate over sorted subgraph and contract nodes
                 for (_i, node) in subgraph.iter().enumerate() {
                     println!("  Subgraph: [{} / {}]", _i, subgraph.len());
-                    let shortcuts = Self::calc_shortcuts(*node, graph, incoming_graph, &contracted, &mut dijkstra); // Pass the Dijkstra instance
+                    let shortcuts = Self::calc_shortcuts(*node, graph, &contracted, &mut dijkstra); // Pass the Dijkstra instance
 
                     for (from, to, weight, edge_id_a, edge_id_b) in shortcuts {
                         // Add shortcut to graphs
-                        graph.0.insert(graph.1[from as usize].offset as usize, Edge::new(to, weight, Some(edge_id_a), Some(edge_id_b)));
-                        incoming_graph.0.insert(incoming_graph.1[to as usize].offset as usize, Edge::new(from, weight, Some(edge_id_b), Some(edge_id_a)));
+                        graph.edges[from as usize].push(Edge::new(to, weight, Some(edge_id_a), Some(edge_id_b)));
+                        graph.adj_edges[to as usize].push(Edge::new(from, weight, Some(edge_id_a), Some(edge_id_b)));
                         number_added_shortcuts += 1;
-
-                        // Patch graphs
-                        Self::patch_graph(graph, from);
-                        Self::patch_graph(incoming_graph, to);
                     }
 
                     // Set level of node
-                    graph.1[*node as usize].level = Some(level);
+                    graph.nodes[*node as usize].level = Some(level);
                     level += 1;
 
                     // Mark node as contracted
@@ -375,23 +340,23 @@ impl<'a> CH<'a> {
         }
     }
 
-    fn calc_shortcuts(node: u64, graph: &OffsetArray, incoming_graph: &OffsetArray, contracted: &Vec<bool>, dijkstra: &mut Dijkstra) -> Vec<Shortcut> {
+    fn calc_shortcuts(node: u64, graph: &Graph, contracted: &Vec<bool>, dijkstra: &mut Dijkstra) -> Vec<Shortcut> {
         // (from, to, weight, edge_id_a, edge_id_b)
         let mut shortcuts : Vec<Shortcut> = Vec::new();
 
-        for incoming_edge in incoming_graph.1[node as usize].offset..incoming_graph.1[node as usize + 1].offset {
-            let incoming_node = incoming_graph.0[incoming_edge as usize].to;
-            for outgoing_edge in graph.1[node as usize].offset..graph.1[node as usize + 1].offset {
-                let outgoing_node = graph.0[outgoing_edge as usize].to;
+        for (edge_id_a, incoming_edge) in graph.adj_edges[node as usize].iter().enumerate() {
+            let incoming_node = incoming_edge.to;
+            for (edge_id_b, outgoing_edge) in graph.edges[node as usize].iter().enumerate() {
+                let outgoing_node = outgoing_edge.to;
                 // Skip already contracted nodes
                 if contracted[incoming_node as usize] || contracted[outgoing_node as usize] {
                     continue;
                 }
 
                 if let Some(shortest_path) = dijkstra.shortest_path(incoming_node, outgoing_node, Some(contracted)) {
-                    let direct_distance = incoming_graph.0[incoming_edge as usize].weight + graph.0[outgoing_edge as usize].weight;
+                    let direct_distance = incoming_edge.weight + outgoing_edge.weight;
                     if shortest_path >= direct_distance {
-                        shortcuts.push((incoming_node, outgoing_node, direct_distance, incoming_edge, outgoing_edge));
+                        shortcuts.push((incoming_node, outgoing_node, direct_distance, edge_id_a as u64, edge_id_b as u64));
                     }
                 }
             }
@@ -400,39 +365,19 @@ impl<'a> CH<'a> {
         shortcuts
     }
 
-    fn patch_graph(graph: &mut OffsetArray, inserted_at: u64) {
-        for i in (inserted_at as usize + 1)..graph.1.len() {
-            graph.1[i].offset += 1;
-        }
-
-        for i in (graph.1[inserted_at as usize].offset as usize)..graph.0.len() {
-            if let Some(edge_id_a) = graph.0[i].edge_id_a {
-                if edge_id_a >= graph.1[inserted_at as usize].offset {
-                    graph.0[i].edge_id_a = Some(edge_id_a + 1);
-                }
-            }
-
-            if let Some(edge_id_b) = graph.0[i].edge_id_b {
-                if edge_id_b >= graph.1[inserted_at as usize].offset {
-                    graph.0[i].edge_id_b = Some(edge_id_b + 1);
-                }
-            }
-        }
-    }
-
-    fn calc_edges_deleted(node: u64, graph: &OffsetArray, incoming_graph: &OffsetArray) -> u64 {
-        let incoming_edges = incoming_graph.1[node as usize + 1].offset - incoming_graph.1[node as usize].offset;
-        let outgoing_edges = graph.1[node as usize + 1].offset - graph.1[node as usize].offset;
+    fn calc_edges_deleted(node: u64, graph: &Graph) -> u64 {
+        let incoming_edges = graph.adj_edges[node as usize].len() as u64;
+        let outgoing_edges = graph.edges[node as usize].len() as u64;
         incoming_edges + outgoing_edges
     }
 
-    fn max_shortcuts_created(node: u64, graph: &OffsetArray, incoming_graph: &OffsetArray) -> u64 {
-        let incoming_edges = incoming_graph.1[node as usize + 1].offset - incoming_graph.1[node as usize].offset;
-        let outgoing_edges = graph.1[node as usize + 1].offset - graph.1[node as usize].offset;
+    fn max_shortcuts_created(node: u64, graph: &Graph) -> u64 {
+        let incoming_edges = graph.adj_edges[node as usize].len() as u64;
+        let outgoing_edges = graph.edges[node as usize].len() as u64;
         incoming_edges * outgoing_edges
     }
 
-    fn dfs(graph: &OffsetArray, incoming_graph: &OffsetArray, start: u64, visited: &mut [bool]) -> Vec<u64> {
+    fn dfs(graph: &Graph, start: u64, visited: &mut [bool]) -> Vec<u64> {
         let mut stack = Vec::new();
         let mut subgraph = Vec::new();
         stack.push(start);
@@ -447,15 +392,15 @@ impl<'a> CH<'a> {
             visited[node] = true;
     
             // Traverse bidirectionally because we need weak comps
-            for i in graph.1[node].offset..graph.1[node + 1].offset {
-                let neighbor = graph.0[i as usize].to;
+            for edge in &graph.edges[node] {
+                let neighbor = edge.to;
                 if !visited[neighbor as usize] {
                     stack.push(neighbor);
                 }
             }
     
-            for i in incoming_graph.1[node].offset..incoming_graph.1[node + 1].offset {
-                let neighbor = incoming_graph.0[i as usize].to;
+            for edge in &graph.adj_edges[node] {
+                let neighbor = edge.to;
                 if !visited[neighbor as usize] {
                     stack.push(neighbor);
                 }
@@ -467,22 +412,21 @@ impl<'a> CH<'a> {
 }
 
 struct Dijkstra<'a> {
-    graph: &'a OffsetArray,
+    graph: &'a Graph,
     distances: Vec<Option<u64>>,
     heap: BinaryHeap<Distance>,
     visited: Vec<u64>
 }
 
 impl<'a> Dijkstra<'a> {
-    pub fn new(graph: &'a OffsetArray) -> Self {
-        Dijkstra { graph, distances: vec![None; graph.1.len() - 1], heap: BinaryHeap::new(), visited: Vec::new() }
+    pub fn new(graph: &'a Graph) -> Self {
+        Dijkstra { graph, distances: vec![None; graph.nodes.len()], heap: BinaryHeap::new(), visited: Vec::new() }
     }
 
-    pub fn unsafe_new(graph_ptr: *const OffsetArray) -> Self{
+    pub fn unsafe_new(graph_ptr: *const Graph) -> Self{
         unsafe {
             let graph = &*graph_ptr;
-            // use graph safely here
-            Dijkstra { graph, distances: vec![None; graph.1.len() - 1], heap: BinaryHeap::new(), visited: Vec::new() }
+            Self::new(graph)
         }
     }
 
@@ -509,8 +453,7 @@ impl<'a> Dijkstra<'a> {
                 }
             }
 
-            for i in self.graph.1[id as usize].offset..self.graph.1[id as usize + 1].offset {
-                let edge = &self.graph.0[i as usize];
+            for edge in &self.graph.edges[id as usize] {
                 if let Some(contracted) = contracted {
                     if contracted[edge.to as usize] {
                         continue;
@@ -553,13 +496,13 @@ fn read_query(filename: &str) -> Result<Vec<(u64, u64)>, Box<dyn Error>> {
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Task 1
-    if false {
+    if true {
         // Load graph with CH levels
         let mut log = BufWriter::new(File::create("dump.txt").expect("Could not create log"));
 
         let start = Instant::now();
         println!("Started parsing...");
-        let (perm, graph, incoming_graph) = parse_graph("stgtregbz_ch.fmi")?;
+        let (perm, graph) = parse_graph("stgtregbz_ch.fmi")?;
         let duration = start.elapsed();
         println!("Loaded graph in {:.2?}", duration);
 
@@ -578,7 +521,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let duration = start.elapsed();
         println!("[{:.2?}]", duration);
 
-        let mut ch = CH::new(&graph, &incoming_graph);
+        let mut ch = CH::new(&graph);
     
         print!("CH (without stall-on-demand): ");
         let start = Instant::now();
@@ -597,19 +540,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         let duration = start.elapsed();
         println!("[{:.2?}]", duration);
+        exit(0);
     }
     // Task 2: Run own CH preprocessing
     
     // TODO: IDK remove this or hmm
     let start = Instant::now();
     println!("Started parsing...");
-    let (prep_perm, mut prep_graph, mut prep_incoming_graph) = parse_graph("inputs/MV.fmi")?;
+    let (prep_perm, mut prep_graph) = parse_graph("inputs/MV.fmi")?;
     let duration = start.elapsed();
     println!("Loaded graph in {:.2?}", duration);
 
     let start = Instant::now();
     println!("Starting CH preprocessing...");
-    CH::preprocess(&mut prep_graph, &mut prep_incoming_graph, &prep_perm);
+    CH::preprocess(&mut prep_graph, &prep_perm);
     let duration = start.elapsed();
     println!("Preprocessed in {:.2?}", duration);
 
@@ -624,15 +568,15 @@ mod tests {
 
     #[test]
     fn test_random_shortest_paths() {
-        let (perm, graph, incoming_graph) = parse_graph("stgtregbz_ch.fmi").unwrap();
+        let (perm, graph) = parse_graph("stgtregbz_ch.fmi").unwrap();
         let mut dijkstra = Dijkstra::new(&graph);
-        let mut ch = CH::new(&graph, &incoming_graph);
+        let mut ch = CH::new(&graph);
         
         let mut rng = thread_rng();
-        let mut s: u64 = rng.gen_range(0..graph.1.len() as u64 - 1);
+        let mut s: u64 = rng.gen_range(0..graph.nodes.len() as u64);
 
         for i in 0..100 {
-            let t: u64 = rng.gen_range(0..graph.1.len() as u64 - 1);
+            let t: u64 = rng.gen_range(0..graph.nodes.len() as u64);
             
             // Dijkstra
             let start = Instant::now();
@@ -650,7 +594,7 @@ mod tests {
     
             // Only change s every 10th step
             if i % 10 == 0 {
-                s = rng.gen_range(0..graph.1.len() as u64 - 1);
+                s = rng.gen_range(0..graph.nodes.len() as u64);
             }
         }
     }

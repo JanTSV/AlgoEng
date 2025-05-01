@@ -184,6 +184,8 @@ impl PartialOrd for Distance {
     }
 }
 
+type Shortcut = (u64, u64, u64, u64, u64);
+
 struct CH<'a> {
     // s -> t
     graph: &'a OffsetArray,
@@ -332,39 +334,88 @@ impl<'a> CH<'a> {
         // Sort independent set by edge-difference (#shortcuts created - #edges deleted)
         // Contract nodes (u) in that order with Dijkstras (shortcuts only if Dijkstra(neighbor_i, neighbor_j)
         //  > c(u, neighbor_i) + c(u, neighbor_j). i and j are edgeA and edgeB
-        let mut visited = vec![false; graph.1.len() - 1];
+        let l = graph.1.len() - 1;
+        let mut visited = vec![false; l];
+        let mut contracted = vec![false; l];
+        let mut number_added_shortcuts = 0;
 
-        for node in 0..visited.len() {
+        for node in 0..l {
+            println!("Preprocessing at {} out of {}: [{}%]", node, l, (node * 100) / l);
+
             if !visited[node] {
+                let mut level = 0;
                 let mut subgraph = Self::dfs(graph, incoming_graph, node as u64, &mut visited);
 
-                // Sort subgraph by increasing #shortcuts created - #edges deleted
+                // Sort subgraph by increasing #max shortcuts created - #edges deleted
                 subgraph.sort_by_key(|node| {
+                    let max_shortcuts_created = Self::max_shortcuts_created(*node, graph, incoming_graph);
                     let edges_deleted = Self::calc_edges_deleted(*node, graph, incoming_graph);
-                    let shortcuts_created = Self::calc_shortcuts(*node, graph, incoming_graph).len();
-                    
-                    shortcuts_created as i64 - edges_deleted as i64
+                    max_shortcuts_created as i64 - edges_deleted as i64
                 });
 
-                // TODO: Contract nodes
-                for node in subgraph {
+                // Iterate over sorted subgraph and contract nodes
+                for (_i, node) in subgraph.iter().enumerate() {
+                    println!("  Subgraph: [{} / {}]", _i, subgraph.len());
+                    let shortcuts = Self::calc_shortcuts(*node, graph, incoming_graph, &contracted);
 
+                    for (from, to, weight, edge_id_a, edge_id_b) in shortcuts {
+                        // Add shortcut to graphs
+                        graph.0.insert(graph.1[from as usize].offset as usize, Edge::new(to, weight, Some(edge_id_a), Some(edge_id_b)));
+                        incoming_graph.0.insert(incoming_graph.1[to as usize].offset as usize, Edge::new(from, weight, Some(edge_id_b), Some(edge_id_a)));
+                        number_added_shortcuts += 1;
+
+                        // Patch graphs
+                        Self::patch_graph(graph, from);
+                        Self::patch_graph(incoming_graph, to);
+                    }
+
+                    // Set lebel of node
+                    graph.1[*node as usize].level = Some(level);
+                    level += 1;
+                    
+                    // Mark node as contracted
+                    contracted[*node as usize] = true;
                 }
             }
         }
 
     }
 
-    fn calc_shortcuts(node: u64, graph: &OffsetArray, incoming_graph: &OffsetArray) -> Vec<(u64, u64, u64, u64, u64)> {
+    fn patch_graph(graph: &mut OffsetArray, inserted_at: u64) {
+        for i in (inserted_at as usize + 1)..graph.1.len() {
+            graph.1[i].offset += 1;
+        }
+
+        for i in (graph.1[inserted_at as usize].offset as usize)..graph.0.len() {
+            if let Some(edge_id_a) = graph.0[i].edge_id_a {
+                if edge_id_a >= graph.1[inserted_at as usize].offset {
+                    graph.0[i].edge_id_a = Some(edge_id_a + 1);
+                }
+            }
+
+            if let Some(edge_id_b) = graph.0[i].edge_id_b {
+                if edge_id_b >= graph.1[inserted_at as usize].offset {
+                    graph.0[i].edge_id_b = Some(edge_id_b + 1);
+                }
+            }
+        }
+    }
+
+    fn calc_shortcuts(node: u64, graph: &OffsetArray, incoming_graph: &OffsetArray, contracted: &Vec<bool>) -> Vec<Shortcut> {
         let mut dijkstra = Dijkstra::new(graph);
         // (from, to, weight, edge_id_a, edge_id_b)
-        let mut shortcuts : Vec<(u64, u64, u64, u64, u64)> = Vec::new();
+        let mut shortcuts : Vec<Shortcut> = Vec::new();
 
         for incoming_edge in incoming_graph.1[node as usize].offset..incoming_graph.1[node as usize + 1].offset {
             let incoming_node = incoming_graph.0[incoming_edge as usize].to;
             for outgoing_edge in graph.1[node as usize].offset..graph.1[node as usize + 1].offset {
                 let outgoing_node = graph.0[outgoing_edge as usize].to;
-                if let Some(shortest_path) = dijkstra.shortest_path(incoming_node, outgoing_node) {
+                // Skip already contracted nodes
+                if contracted[incoming_node as usize] || contracted[outgoing_node as usize] {
+                    continue;
+                }
+
+                if let Some(shortest_path) = dijkstra.shortest_path(incoming_node, outgoing_node, Some(contracted)) {
                     let direct_distance = incoming_graph.0[incoming_edge as usize].weight + graph.0[outgoing_edge as usize].weight;
                     if shortest_path >= direct_distance {
                         shortcuts.push((incoming_node, outgoing_node, direct_distance, incoming_edge, outgoing_edge));
@@ -380,6 +431,12 @@ impl<'a> CH<'a> {
         let incoming_edges = incoming_graph.1[node as usize + 1].offset - incoming_graph.1[node as usize].offset;
         let outgoing_edges = graph.1[node as usize + 1].offset - graph.1[node as usize].offset;
         incoming_edges + outgoing_edges
+    }
+
+    fn max_shortcuts_created(node: u64, graph: &OffsetArray, incoming_graph: &OffsetArray) -> u64 {
+        let incoming_edges = incoming_graph.1[node as usize + 1].offset - incoming_graph.1[node as usize].offset;
+        let outgoing_edges = graph.1[node as usize + 1].offset - graph.1[node as usize].offset;
+        incoming_edges * outgoing_edges
     }
 
     fn dfs(graph: &OffsetArray, incoming_graph: &OffsetArray, start: u64, visited: &mut [bool]) -> Vec<u64> {
@@ -428,7 +485,7 @@ impl<'a> Dijkstra<'a> {
         Dijkstra { graph, distances: vec![None; graph.1.len() - 1], heap: BinaryHeap::new(), visited: Vec::new() }
     }
 
-    pub fn shortest_path(&mut self, s: u64, t: u64) -> Option<u64> {
+    pub fn shortest_path(&mut self, s: u64, t: u64, contracted: Option<&Vec<bool>>) -> Option<u64> {
         // Cleanup of previous run
         while let Some(node) = self.visited.pop() {
             self.distances[node as usize] = None;
@@ -443,6 +500,12 @@ impl<'a> Dijkstra<'a> {
         while let Some(Distance { weight, id }) = self.heap.pop() {
             if id == t {
                 return Some(weight);
+            }
+
+            if let Some(contracted) = contracted {
+                if contracted[id as usize] {
+                    continue;
+                }
             }
 
             for i in self.graph.1[id as usize].offset..self.graph.1[id as usize + 1].offset {
@@ -502,7 +565,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let t = 754742;
         print!("Dijkstra: ");
         let start = Instant::now();
-        match dijkstra.shortest_path(perm[s as usize], perm[t as usize]) {
+        match dijkstra.shortest_path(perm[s as usize], perm[t as usize], None) {
             Some(dist) => print!("Found a shortest path from {s} to {t}: {dist} "),
             None => print!("Did NOT find a path between {s} and {t} ")
         }
@@ -567,7 +630,7 @@ mod tests {
             
             // Dijkstra
             let start = Instant::now();
-            let d = dijkstra.shortest_path(perm[s as usize], perm[t as usize]);
+            let d = dijkstra.shortest_path(perm[s as usize], perm[t as usize], None);
             let duration = start.elapsed();
             println!("Dijkstra [{:.2?}]", duration);
 

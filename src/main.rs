@@ -25,16 +25,17 @@ impl Edge {
 #[derive(Debug, Clone)]
 struct Node {
     id: u64,
-    level: Option<u64>,
+    level: u64,
     contracted: bool
 }
 
 impl Node {
-    pub fn new(id: u64, level: Option<u64>) -> Self {
+    pub fn new(id: u64, level: u64) -> Self {
         Node { id, level, contracted: false }
     }
 }
 
+#[derive(Debug, Clone)]
 struct Graph {
     edges: Vec<Vec<Edge>>,
     adj_edges: Vec<Vec<Edge>>,
@@ -76,10 +77,10 @@ fn parse_graph(filename: &str) -> Result<(Vec<u64>, Graph), Box<dyn Error>> {
 
         let id: u64 = parts[0].parse()?;
         assert_eq!(id, _i);
-        let level: Option<u64> = if parts.len() >= 6 {
-            parts[5].parse::<u64>().ok()
+        let level: u64 = if parts.len() >= 6 {
+            parts[5].parse::<u64>().unwrap_or(u64::MAX)
         } else {
-            None
+            u64::MAX
         };
 
         nodes.push(Node::new(id, level));
@@ -302,55 +303,7 @@ impl<'a> CH<'a> {
         max_shortcuts_created as i64 - edges_deleted as i64
     }
 
-    pub fn preprocess(graph: &mut Graph) {
-        let l = graph.nodes.len();
-        let mut visited = vec![false; l];
-        let mut number_added_shortcuts = 0;
-        let mut dijkstra = Dijkstra::unsafe_new(graph as *const Graph); // Create Dijkstra instance here
-
-        for node in 0..l {
-            // println!("Preprocessing at {} out of {}: [{}%]", node, l, (node * 100) / l);
-
-            if !visited[node] {
-                let mut level = 0;
-                let mut subgraph = Self::dfs(graph, node as u64, &mut visited);
-
-                // Sort subgraph by increasing #max shortcuts created - #edges deleted
-                subgraph.sort_by_key(|node| {
-                    Self::compute_edge_difference(*node, graph)
-                });
-
-                // Iterate over sorted subgraph and contract nodes
-                for (_i, node) in subgraph.iter().enumerate() {
-                    // println!("  Subgraph: [{} / {}]", _i, subgraph.len());
-                    let shortcuts = Self::calc_shortcuts(*node, graph, &mut dijkstra);
-
-                    for (from, to, weight, edge_id_a, edge_id_b) in shortcuts {
-                        // Add shortcut to graphs
-                        graph.edges[from as usize].push(Edge::new(to, weight, Some(edge_id_a), Some(edge_id_b)));
-                        graph.adj_edges[to as usize].push(Edge::new(from, weight, Some(edge_id_a), Some(edge_id_b)));
-                        number_added_shortcuts += 1;
-                    }
-
-                    // Now contract all edges of the node
-                    for edge in graph.edges[*node as usize].iter_mut() {
-                        edge.contracted = true;
-                    }
-                    for edge in graph.adj_edges[*node as usize].iter_mut() {
-                        edge.contracted = true;
-                    }
-
-                    // Set level of node
-                    graph.nodes[*node as usize].contracted = true;
-                    graph.nodes[*node as usize].level = Some(level);
-                    level += 1;
-                }
-            }
-        }
-
-        println!("number_added_shortcuts: {}", number_added_shortcuts);
-    }
-
+    
     fn find_independent_set(graph: &Graph, contracted: &Vec<bool>) -> Vec<u64> {
         let mut independent_set = Vec::new();
         let mut blocked = vec![false; graph.nodes.len()];
@@ -402,15 +355,14 @@ impl<'a> CH<'a> {
                     graph.edges[from as usize].push(Edge::new(to, weight, Some(edge_id_a), Some(edge_id_b)));
                     graph.adj_edges[to as usize].push(Edge::new(from, weight, Some(edge_id_a), Some(edge_id_b)));
                 }
-    
-                graph.nodes[node as usize].level = Some(level);
+                graph.nodes[node as usize].level = level;
                 graph.nodes[node as usize].contracted = true;
                 num_contracted += 1;
             }
             num_contracted
         }
 
-    fn batch_preprocess(graph: &mut Graph) {
+    fn batch_preprocess(graph: &mut Graph) -> usize {
         let mut dijkstra = Dijkstra::unsafe_new(graph);
         let mut level = 0;
         let mut contracted = vec![false; graph.nodes.len()];
@@ -426,7 +378,6 @@ impl<'a> CH<'a> {
     
             let num_contracted = Self::contract_independent_set(graph, &mut dijkstra, indep_set, level, THRESHOLD);
             if num_contracted == 0 {
-                // Increase threshold for new iteration
                 break;
             }
 
@@ -454,6 +405,7 @@ impl<'a> CH<'a> {
         }
 
         println!("#contracted: {}", overall_contracted);
+        overall_contracted
     }
 
     fn calc_shortcuts(node: u64, graph: &mut Graph, dijkstra: &mut Dijkstra) -> Vec<Shortcut> {
@@ -494,39 +446,6 @@ impl<'a> CH<'a> {
         let incoming_edges = graph.adj_edges[node as usize].len() as u64;
         let outgoing_edges = graph.edges[node as usize].len() as u64;
         incoming_edges * outgoing_edges
-    }
-
-    fn dfs(graph: &Graph, start: u64, visited: &mut [bool]) -> Vec<u64> {
-        let mut stack = Vec::new();
-        let mut subgraph = Vec::new();
-        stack.push(start);
-    
-        while let Some(node) = stack.pop() {
-            subgraph.push(node);
-            let node = node as usize;
-            if visited[node] {
-                continue;
-            }
-    
-            visited[node] = true;
-    
-            // Traverse bidirectionally because we need weak comps
-            for edge in &graph.edges[node] {
-                let neighbor = edge.to;
-                if !visited[neighbor as usize] {
-                    stack.push(neighbor);
-                }
-            }
-    
-            for edge in &graph.adj_edges[node] {
-                let neighbor = edge.to;
-                if !visited[neighbor as usize] {
-                    stack.push(neighbor);
-                }
-            }
-        }
-
-        subgraph
     }
 }
 
@@ -658,7 +577,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Run own CH preprocessing
     let start = Instant::now();
     println!("Started parsing...");
-    let (prep_perm, mut prep_graph) = parse_graph("inputs/MV.fmi")?;
+    let (prep_perm, mut prep_graph) = parse_graph("inputs/germany.fmi")?;
     let duration = start.elapsed();
     println!("Loaded graph in {:.2?}", duration);
 
@@ -667,7 +586,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     CH::batch_preprocess(&mut prep_graph);
     let duration = start.elapsed();
     println!("Preprocessed in {:.2?}", duration);
-    
 
 
     Ok(())
@@ -761,5 +679,36 @@ mod tests {
         for (i, (s, t)) in queries.iter().enumerate() {
             assert_eq!(expected[i], dijkstra.shortest_path(*s, *t));
         }
+    }
+
+    #[test]
+    fn test_own_ch_prep() {
+        let (perm, graph) = parse_graph("inputs/germany.fmi").unwrap();
+
+        let mut prep_graph = graph.clone();
+        let start = Instant::now();
+        assert!(CH::batch_preprocess(&mut prep_graph) > 0);
+        let duration = start.elapsed();
+        println!("Preprocessed in {:.2?}", duration);
+
+        let mut dijkstra = Dijkstra::new(&graph);
+        let mut ch = CH::new(&prep_graph);
+
+        let s = 8371828;
+        let t = 16743651;
+
+        // Dijkstra
+        let start = Instant::now();
+        assert_eq!(Some(992243), dijkstra.shortest_path(perm[s as usize], perm[t as usize]));
+        let duration = start.elapsed();
+        println!("Dijkstra [{:.2?}]", duration);
+
+        // CH
+        let start = Instant::now();
+        assert_eq!(Some(992243), ch.shortest_path(perm[s as usize], perm[t as usize], true));
+        let duration = start.elapsed();
+        println!("CH [{:.2?}]", duration);
+
+
     }
 }

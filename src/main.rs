@@ -12,24 +12,26 @@ struct Edge {
     to: u64,
     weight: u64,
     edge_id_a: Option<u64>,
-    edge_id_b: Option<u64>
+    edge_id_b: Option<u64>,
+    contracted: bool
 }
 
 impl Edge {
     pub fn new(to: u64, weight: u64, edge_id_a: Option<u64>, edge_id_b: Option<u64>) -> Self {
-        Edge { to, weight, edge_id_a, edge_id_b}
+        Edge { to, weight, edge_id_a, edge_id_b, contracted: false}
     } 
 }
 
 #[derive(Debug, Clone)]
 struct Node {
     id: u64,
-    level: Option<u64>
+    level: Option<u64>,
+    contracted: bool
 }
 
 impl Node {
     pub fn new(id: u64, level: Option<u64>) -> Self {
-        Node { id, level }
+        Node { id, level, contracted: false }
     }
 }
 
@@ -46,8 +48,6 @@ impl Graph {
         Graph { edges, adj_edges, nodes }
     }
 }
-
-type Level = (u64, Option<u64>);
 
 fn parse_graph(filename: &str) -> Result<(Vec<u64>, Graph), Box<dyn Error>> {
     let file = File::open(filename)?;
@@ -90,7 +90,7 @@ fn parse_graph(filename: &str) -> Result<(Vec<u64>, Graph), Box<dyn Error>> {
     
     // Map original node IDs to new indices after sorting
     let mut id_to_new_index = vec![0u64; nodes.len()];
-    for (new_index, Node {id: old_id, level: _}) in nodes.iter().enumerate() {
+    for (new_index, Node {id: old_id, ..}) in nodes.iter().enumerate() {
         id_to_new_index[*old_id as usize] = new_index as u64;
     }
 
@@ -296,15 +296,14 @@ impl<'a> CH<'a> {
         distance
     }
 
-    pub fn preprocess(graph: &mut Graph, perm: &Vec<u64>) {
+    pub fn preprocess(graph: &mut Graph) {
         let l = graph.nodes.len();
         let mut visited = vec![false; l];
-        let mut contracted = vec![false; l];
         let mut number_added_shortcuts = 0;
         let mut dijkstra = Dijkstra::unsafe_new(graph as *const Graph); // Create Dijkstra instance here
 
         for node in 0..l {
-            println!("Preprocessing at {} out of {}: [{}%]", node, l, (node * 100) / l);
+            // println!("Preprocessing at {} out of {}: [{}%]", node, l, (node * 100) / l);
 
             if !visited[node] {
                 let mut level = 0;
@@ -319,8 +318,8 @@ impl<'a> CH<'a> {
 
                 // Iterate over sorted subgraph and contract nodes
                 for (_i, node) in subgraph.iter().enumerate() {
-                    println!("  Subgraph: [{} / {}]", _i, subgraph.len());
-                    let shortcuts = Self::calc_shortcuts(*node, graph, &contracted, &mut dijkstra); // Pass the Dijkstra instance
+                    // println!("  Subgraph: [{} / {}]", _i, subgraph.len());
+                    let shortcuts = Self::calc_shortcuts(*node, graph, &mut dijkstra);
 
                     for (from, to, weight, edge_id_a, edge_id_b) in shortcuts {
                         // Add shortcut to graphs
@@ -329,35 +328,46 @@ impl<'a> CH<'a> {
                         number_added_shortcuts += 1;
                     }
 
+                    // Now contract all edges of the node
+                    for edge in graph.edges[*node as usize].iter_mut() {
+                        edge.contracted = true;
+                    }
+                    for edge in graph.adj_edges[*node as usize].iter_mut() {
+                        edge.contracted = true;
+                    }
+
                     // Set level of node
+                    graph.nodes[*node as usize].contracted = true;
                     graph.nodes[*node as usize].level = Some(level);
                     level += 1;
-
-                    // Mark node as contracted
-                    contracted[*node as usize] = true;
                 }
             }
         }
+
+        println!("number_added_shortcuts: {}", number_added_shortcuts);
     }
 
-    fn calc_shortcuts(node: u64, graph: &Graph, contracted: &Vec<bool>, dijkstra: &mut Dijkstra) -> Vec<Shortcut> {
+    fn calc_shortcuts(node: u64, graph: &mut Graph, dijkstra: &mut Dijkstra) -> Vec<Shortcut> {
         // (from, to, weight, edge_id_a, edge_id_b)
         let mut shortcuts : Vec<Shortcut> = Vec::new();
 
-        for (edge_id_a, incoming_edge) in graph.adj_edges[node as usize].iter().enumerate() {
+        for (edge_id_b, incoming_edge) in graph.adj_edges[node as usize].iter_mut().enumerate() {
             let incoming_node = incoming_edge.to;
-            for (edge_id_b, outgoing_edge) in graph.edges[node as usize].iter().enumerate() {
+            for (edge_id_a, outgoing_edge) in graph.edges[node as usize].iter_mut().enumerate() {
                 let outgoing_node = outgoing_edge.to;
-                // Skip already contracted nodes
-                if contracted[incoming_node as usize] || contracted[outgoing_node as usize] {
+
+                if graph.nodes[incoming_node as usize].contracted || graph.nodes[outgoing_node as usize].contracted {
                     continue;
                 }
 
-                if let Some(shortest_path) = dijkstra.shortest_path(incoming_node, outgoing_node, Some(contracted)) {
+                if let Some(shortest_path) = dijkstra.shortest_path(incoming_node, outgoing_node) {
                     let direct_distance = incoming_edge.weight + outgoing_edge.weight;
                     if shortest_path >= direct_distance {
                         shortcuts.push((incoming_node, outgoing_node, direct_distance, edge_id_a as u64, edge_id_b as u64));
                     }
+                } else {
+                    println!("WHOOP: {} -> {}", incoming_node, outgoing_node);
+                    exit(0);
                 }
             }
         }
@@ -430,7 +440,7 @@ impl<'a> Dijkstra<'a> {
         }
     }
 
-    pub fn shortest_path(&mut self, s: u64, t: u64, contracted: Option<&Vec<bool>>) -> Option<u64> {
+    pub fn shortest_path(&mut self, s: u64, t: u64) -> Option<u64> {
         // Cleanup of previous run
         while let Some(node) = self.visited.pop() {
             self.distances[node as usize] = None;
@@ -447,18 +457,11 @@ impl<'a> Dijkstra<'a> {
                 return Some(weight);
             }
 
-            if let Some(contracted) = contracted {
-                if contracted[id as usize] {
+            for edge in &self.graph.edges[id as usize] {
+                if edge.contracted {
                     continue;
                 }
-            }
 
-            for edge in &self.graph.edges[id as usize] {
-                if let Some(contracted) = contracted {
-                    if contracted[edge.to as usize] {
-                        continue;
-                    }
-                }
                 if self.distances[edge.to as usize].is_none_or(|curr| weight + edge.weight < curr) {
                     self.distances[edge.to as usize] = Some(weight + edge.weight);
                     self.heap.push(Distance::new(weight + edge.weight, edge.to));
@@ -496,7 +499,7 @@ fn read_query(filename: &str) -> Result<Vec<(u64, u64)>, Box<dyn Error>> {
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Task 1
-    if true {
+    if false {
         // Load graph with CH levels
         let mut log = BufWriter::new(File::create("dump.txt").expect("Could not create log"));
 
@@ -514,7 +517,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let t = 754742;
         print!("Dijkstra: ");
         let start = Instant::now();
-        match dijkstra.shortest_path(perm[s as usize], perm[t as usize], None) {
+        match dijkstra.shortest_path(perm[s as usize], perm[t as usize]) {
             Some(dist) => print!("Found a shortest path from {s} to {t}: {dist} "),
             None => print!("Did NOT find a path between {s} and {t} ")
         }
@@ -540,7 +543,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         let duration = start.elapsed();
         println!("[{:.2?}]", duration);
-        exit(0);
     }
     // Task 2: Run own CH preprocessing
     
@@ -553,7 +555,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let start = Instant::now();
     println!("Starting CH preprocessing...");
-    CH::preprocess(&mut prep_graph, &prep_perm);
+    CH::preprocess(&mut prep_graph);
     let duration = start.elapsed();
     println!("Preprocessed in {:.2?}", duration);
 
@@ -580,7 +582,7 @@ mod tests {
             
             // Dijkstra
             let start = Instant::now();
-            let d = dijkstra.shortest_path(perm[s as usize], perm[t as usize], None);
+            let d = dijkstra.shortest_path(perm[s as usize], perm[t as usize]);
             let duration = start.elapsed();
             println!("Dijkstra [{:.2?}]", duration);
 
@@ -596,6 +598,58 @@ mod tests {
             if i % 10 == 0 {
                 s = rng.gen_range(0..graph.nodes.len() as u64);
             }
+        }
+    }
+
+    #[test]
+    fn test_querry() {
+        let queries = read_query("inputs/queries.txt").unwrap();
+        let (perm, graph) = parse_graph("inputs/MV.fmi").unwrap();
+        let mut dijkstra = Dijkstra::new(&graph);
+
+        let expected = [Some(210922),
+            Some(211124),
+            Some(212697),
+            Some(211381),
+            Some(210818),
+            Some(213098),
+            Some(210569),
+            Some(211076),
+            Some(212353),
+            Some(210427),
+            Some(212241),
+            Some(212443),
+            Some(214016),
+            Some(212700),
+            Some(212137),
+            Some(214417),
+            Some(211888),
+            Some(212395),
+            Some(213672),
+            Some(211746),
+            Some(214577),
+            Some(214779),
+            Some(216352),
+            Some(215036),
+            Some(214473),
+            Some(216753),
+            Some(214224),
+            Some(214731),
+            Some(216008),
+            Some(214082),
+            Some(215758),
+            Some(215960),
+            Some(217533),
+            Some(216217),
+            Some(215654),
+            Some(217934),
+            Some(215405),
+            Some(215912),
+            Some(217189),
+            Some(215263)];
+
+        for (i, (s, t)) in queries.iter().enumerate() {
+            assert_eq!(expected[i], dijkstra.shortest_path(*s, *t));
         }
     }
 }

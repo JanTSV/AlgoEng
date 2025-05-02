@@ -1,6 +1,8 @@
 use std::collections::BinaryHeap;
 use std::process::exit;
 
+use rayon::prelude::*;
+
 use crate::graph::{OffsetArray, Edge};
 use crate::dijkstra::{Distance, Dijkstra};
 
@@ -308,32 +310,47 @@ impl CH {
     }
 
 
-    fn _contract_indep_set(graph: &OffsetArray, indep_set: &Vec<(i64, usize)>, level: usize, threshold: i64, contracted: &mut Vec<bool>) -> (usize, usize, OffsetArray) {
+    fn _contract_indep_set(
+        graph: &OffsetArray,
+        indep_set: &Vec<(i64, usize)>,
+        level: usize,
+        threshold: i64,
+        contracted: &mut Vec<bool>
+    ) -> (usize, usize, OffsetArray) {
+        let (nodes, mut edges, mut reverse_edges) = graph.unflatten();
+    
+        // Step 1: Compute shortcut additions in parallel
+        let results: Vec<_> = indep_set
+            .par_iter()
+            .filter(|&&(edge_diff, _)| edge_diff <= threshold)
+            .map(|&(_, node)| {
+                let shortcuts = Self::calc_shortcuts(graph, node, contracted);
+                (node, shortcuts)
+            })
+            .collect();
+    
         let mut num_created = 0;
         let mut num_contracted = 0;
-
-
-        // Create a new graph with the shortcuts
-        let (mut nodes, mut edges, mut reverse_edges) = graph.unflatten();
-        for (edge_diff, node) in indep_set {
-            if *edge_diff <= threshold {
-                let shortcuts = Self::calc_shortcuts(graph, *node, contracted);
-                for (from, to, weight, edge_id_a, edge_id_b) in shortcuts {
-                    // Add shortcuts
-                    edges[from].push(Edge::new(to, weight, 0, -1, Some(edge_id_a), Some(edge_id_b)));
-                    reverse_edges[to].push(Edge::new(from, weight, 0, -1, None, None));
-
-                    num_created += 1;
-                } 
-
-                //  Mark node as contracted and set level
-                nodes[*node].level = level;
-                contracted[*node] = true;
-                num_contracted += 1;
+        let mut new_nodes = nodes.clone(); // We'll modify and rebuild
+    
+        // Step 2: Apply the modifications sequentially
+        for (node, shortcuts) in results {
+            for (from, to, weight, edge_id_a, edge_id_b) in shortcuts {
+                edges[from].push(Edge::new(to, weight, 0, -1, Some(edge_id_a), Some(edge_id_b)));
+                reverse_edges[to].push(Edge::new(from, weight, 0, -1, None, None));
+                num_created += 1;
             }
+    
+            new_nodes[node].level = level;
+            contracted[node] = true;
+            num_contracted += 1;
         }
-
-        (num_contracted, num_created, OffsetArray::build_from(nodes, edges, reverse_edges))
+    
+        (
+            num_contracted,
+            num_created,
+            OffsetArray::build_from(new_nodes, edges, reverse_edges),
+        )
     }
     
     fn _find_independent_set(graph: &OffsetArray, contracted: &Vec<bool>) -> Vec<(i64, usize)> {

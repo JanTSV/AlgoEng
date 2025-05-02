@@ -140,8 +140,8 @@ impl CH {
         let (mut nodes, mut edges, mut reverse_edges) = graph.unflatten();
 
         for (from, to, weight, edge_id_a, edge_id_b) in Self::calc_shortcuts(graph, node, contracted) {
-            edges[from].push(Edge::new(to, weight, Some(edge_id_a), Some(edge_id_b)));
-            reverse_edges[to].push(Edge::new(from, weight, None, None));
+            edges[from].push(Edge::new(to, weight, 0, -1, Some(edge_id_a), Some(edge_id_b)));
+            reverse_edges[to].push(Edge::new(from, weight, 0, -1, None, None));
         }
 
         nodes[node].level = level;
@@ -166,8 +166,8 @@ impl CH {
         for (c, shortcut) in shortcuts {
             // Add shortcuts
             for (from, to, weight, edge_id_a, edge_id_b) in shortcut {
-                edges[from].push(Edge::new(to, weight, Some(edge_id_a), Some(edge_id_b)));
-                reverse_edges[to].push(Edge::new(from, weight, None, None));
+                edges[from].push(Edge::new(to, weight, 0, -1, Some(edge_id_a), Some(edge_id_b)));
+                reverse_edges[to].push(Edge::new(from, weight, 0, -1, None, None));
             }
 
             //  Mark node as contracted and set level

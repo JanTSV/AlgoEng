@@ -1,15 +1,20 @@
+use std::{fs::OpenOptions, error::Error};
+use std::io::Write;
+
 
 #[derive(Debug, Clone)]
 pub struct Edge {
     pub to: usize,
     pub weight: u64,
+    pub typ: u64,
+    pub max_speed: i64,
     pub edge_id_a: Option<usize>,
     pub edge_id_b: Option<usize>,
 }
 
 impl Edge {
-    pub fn new(to: usize, weight: u64, edge_id_a: Option<usize>, edge_id_b: Option<usize>) -> Self {
-        Edge { to, weight, edge_id_a, edge_id_b }
+    pub fn new(to: usize, weight: u64, typ: u64, max_speed: i64, edge_id_a: Option<usize>, edge_id_b: Option<usize>) -> Self {
+        Edge { to, weight, typ, max_speed, edge_id_a, edge_id_b }
     }
 }
 
@@ -88,24 +93,52 @@ impl OffsetArray {
          &self.reverse_edges[self.reverse_offsets[idx]..self.reverse_offsets[idx + 1]]
     }
 
-    pub fn add_edge(&mut self, idx: usize, edge: Edge) {
-        // Insert edge
-        self.edges.insert(self.offsets[idx], edge);
+    pub fn to_file(&self, filename: &str) -> Result<(), Box<dyn Error>> {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(filename)?;
 
-        // Patch offsets
-        for i in idx + 1..self.offsets.len() {
-            self.offsets[i] += 1;
+        // Comment header
+        for _ in 0..9 {
+            writeln!(file, "# ")?;
         }
-    }
 
-    pub fn add_rev_edge(&mut self, idx: usize, edge: Edge) {
-        // Insert edge
-        self.reverse_edges.insert(self.offsets[idx], edge);
+        // One empty line
+        writeln!(file, "")?;
 
-        // Patch offsets
-        for i in idx + 1..self.reverse_offsets.len() {
-            self.reverse_offsets[i] += 1;
+        // #nodes
+        writeln!(file, "{}", self.nodes.len())?;
+
+        // #edges
+        writeln!(file, "{}", self.offsets.last().unwrap())?;
+
+        // Print nodes: <ID> <OSMID> <Lat> <Lon> <Height> <Level>
+        for (id, node) in self.nodes.iter().enumerate() {
+            writeln!(file, "{} {} {} {} {} {}", id, node.osm_id, node.lat, node.lon, node.height, node.level)?;
         }
+
+        // Print edges: <SrcID> <TrgID> <Weight> <Type> <MaxSpeed> <EdgeIdA> <EdgeIdB>
+        for i in 0..self.offsets.len() - 1 {
+            for edge in self.outgoing_edges(i) {
+                let edge_id_a: String = match edge.edge_id_a {
+                    Some(x) => x.to_string(),
+                    None => "-1".to_string()
+                };
+                let edge_id_b: String = match edge.edge_id_b {
+                    Some(x) => x.to_string(),
+                    None => "-1".to_string()
+                };
+
+                writeln!(file, "{} {} {} {} {} {} {}", i, edge.to, edge.weight, edge.typ, edge.max_speed, edge_id_a, edge_id_b);
+            }
+        }
+
+        // End empty line
+        writeln!(file, "")?;
+
+        Ok(())
     }
 
     fn flatten(edge_list: Vec<Vec<Edge>>) -> (Vec<Edge>, Vec<usize>) {

@@ -53,13 +53,15 @@ pub fn parse_graph(filename: &str) -> Result<OffsetArray, Box<dyn Error>> {
          let line = lines.next().ok_or("Missing edge line")?;
          let parts: Vec<&str> = line.split_whitespace().collect();
  
-         if parts.len() < 3 {
+         if parts.len() < 5 {
              return Err(format!("Malformed edge line {}, parts: {}", line, parts.len()).into());
          }
  
          let source: usize = parts[0].parse()?;
          let target: usize = parts[1].parse()?;
          let weight: u64 = parts[2].parse()?;
+         let typ: u64 = parts[3].parse()?;
+         let max_speed: i64 = parts[4].parse()?;
          let edge_id_a: Option<usize> = if parts.len() > 5 {
              parts[5].parse().ok()
          } else {
@@ -71,8 +73,8 @@ pub fn parse_graph(filename: &str) -> Result<OffsetArray, Box<dyn Error>> {
              None
          };
  
-         edges[source].push(Edge::new(target, weight, edge_id_a, edge_id_b));
-         reverse_edges[target].push(Edge::new(source, weight, edge_id_b, edge_id_a));
+         edges[source].push(Edge::new(target, weight, typ, max_speed, edge_id_a, edge_id_b));
+         reverse_edges[target].push(Edge::new(source, weight, typ, max_speed, edge_id_b, edge_id_a));
      }
  
 

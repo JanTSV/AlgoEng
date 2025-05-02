@@ -58,6 +58,10 @@ impl OffsetArray {
         &self.nodes[idx]
     }
 
+    pub fn node_at_mut(&mut self, idx: usize) -> &mut Node {
+        &mut self.nodes[idx]
+    }
+
     pub fn outgoing_edges(&self, idx: usize) -> &[Edge] {
          &self.edges[self.offsets[idx]..self.offsets[idx + 1]]
     }

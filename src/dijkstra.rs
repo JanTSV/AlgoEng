@@ -41,6 +41,11 @@ impl<'a> Dijkstra<'a> {
         Dijkstra { graph, weights: vec![None; graph.nodes.len()], heap: BinaryHeap::new(), visited: Vec::new() }
     }
 
+    pub fn unsafe_new(graph: *const OffsetArray) -> Self {
+        let graph = unsafe { &*graph };
+        Self::new(graph)
+    }
+
     pub fn shortest_path(&mut self, s: usize, t: usize) -> Option<u64> {
         // Cleanup of previous run
         while let Some(node) = self.visited.pop() {

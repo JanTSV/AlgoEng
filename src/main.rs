@@ -44,7 +44,7 @@ fn main() {
     let mut ch = CH::new(&ch_graph);
     print!("CH: ");
     let start = Instant::now();
-    let dijkstra_found = dijkstra.shortest_path(START, TARGET);
+    let dijkstra_found = ch.shortest_path(START, TARGET, true);
     match dijkstra_found {
         Some(dist) => print!("Found a shortest path from {START} to {TARGET}: {dist} "),
         None => print!("Did NOT find a path between {START} and {TARGET} ")

@@ -63,10 +63,6 @@ impl<'a> Dijkstra<'a> {
                 return Some(weight);
             }
 
-            if contracted[id] {
-                continue;
-            }
-
             for edge in self.graph.outgoing_edges(id) {
                 if contracted[edge.to] {
                     continue;

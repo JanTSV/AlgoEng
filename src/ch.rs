@@ -1,7 +1,7 @@
 use std::collections::BinaryHeap;
 use std::process::exit;
 
-use crate::graph::OffsetArray;
+use crate::graph::{OffsetArray, Edge};
 use crate::dijkstra::{Distance, Dijkstra};
 
 type Shortcut = (usize, usize, u64, usize, usize);
@@ -113,7 +113,7 @@ impl<'a> CH<'a> {
                 break;
             }
     
-            let num_contracted = Self::contract_independent_set(graph, &mut contracted, &mut dijkstra, indep_set, level, THRESHOLD);
+            let num_contracted = Self::contract_independent_set(graph, &mut contracted, &mut dijkstra, &indep_set, level, THRESHOLD);
             if num_contracted == 0 {
                 break;
             }
@@ -207,14 +207,14 @@ impl<'a> CH<'a> {
         graph: &mut OffsetArray,
         contracted: &mut Vec<bool>,
         dijkstra: &mut Dijkstra,
-        indep_set: Vec<usize>,
+        indep_set: &Vec<usize>,
         level: usize,
         threshold: i64,
     ) -> usize {
         let mut num_contracted = 0;
     
-        for &node in &indep_set {
-            num_contracted += Self::contract_node(node, graph, contracted, dijkstra, level, threshold);
+        for node in indep_set {
+            num_contracted += Self::contract_node(*node, graph, contracted, dijkstra, level, threshold);
         }
     
         num_contracted
@@ -231,9 +231,8 @@ impl<'a> CH<'a> {
             if diff <= threshold {
                 let shortcuts = Self::calc_shortcuts(node, graph, contracted, dijkstra);
                 for (from, to, weight, edge_id_a, edge_id_b) in shortcuts {
-                    // TODO: add shortcuts and patch graph
-                    // graph.edges[from as usize].push(Edge::new(to, weight, Some(edge_id_a), Some(edge_id_b)));
-                    // graph.adj_edges[to as usize].push(Edge::new(from, weight, Some(edge_id_a), Some(edge_id_b)));
+                    // graph.add_edge(from, Edge::new(to, weight, Some(edge_id_a), Some(edge_id_b)));
+                    // graph.add_rev_edge(to, Edge::new(from, weight, None, None));
                 }
                 graph.node_at_mut(node).level = level;
                 contracted[node] = true;
@@ -250,12 +249,7 @@ impl<'a> CH<'a> {
             let incoming_node = incoming_edge.to;
             for (edge_id_a, outgoing_edge) in graph.outgoing_edges(node).iter().enumerate() {
                 let outgoing_node = outgoing_edge.to;
-
-                if contracted[incoming_node] || contracted[outgoing_node] {
-                    continue;
-                }
-
-                if let Some(shortest_path) = dijkstra.shortest_path_consider_contraction(incoming_node,outgoing_node, contracted) {
+                if let Some(shortest_path) = dijkstra.shortest_path(incoming_node,outgoing_node) {
                     let direct_distance = incoming_edge.weight + outgoing_edge.weight;
                     if shortest_path >= direct_distance {
                         shortcuts.push((incoming_node, outgoing_node, direct_distance, edge_id_a, edge_id_b));

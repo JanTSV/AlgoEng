@@ -70,6 +70,26 @@ impl OffsetArray {
          &self.reverse_edges[self.reverse_offsets[idx]..self.reverse_offsets[idx + 1]]
     }
 
+    pub fn add_edge(&mut self, idx: usize, edge: Edge) {
+        // Insert edge
+        self.edges.insert(self.offsets[idx], edge);
+
+        // Patch offsets
+        for i in idx + 1..self.offsets.len() {
+            self.offsets[i] += 1;
+        }
+    }
+
+    pub fn add_rev_edge(&mut self, idx: usize, edge: Edge) {
+        // Insert edge
+        self.reverse_edges.insert(self.offsets[idx], edge);
+
+        // Patch offsets
+        for i in idx + 1..self.reverse_offsets.len() {
+            self.reverse_offsets[i] += 1;
+        }
+    }
+
     fn flatten(edge_list: Vec<Vec<Edge>>) -> (Vec<Edge>, Vec<usize>) {
         let mut flat_edges: Vec<Edge> = Vec::new();
         let mut offsets: Vec<usize> = Vec::new();

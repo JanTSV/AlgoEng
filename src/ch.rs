@@ -113,7 +113,7 @@ impl<'a> CH<'a> {
                 break;
             }
     
-            let num_contracted = Self::contract_independent_set(graph, &mut dijkstra, indep_set, level, THRESHOLD);
+            let num_contracted = Self::contract_independent_set(graph, &mut contracted, &mut dijkstra, indep_set, level, THRESHOLD);
             if num_contracted == 0 {
                 break;
             }
@@ -131,7 +131,7 @@ impl<'a> CH<'a> {
             .collect();
 
         for node in remaining_nodes {
-            overall_contracted += Self::contract_node(node, graph, &mut dijkstra, level, THRESHOLD);
+            overall_contracted += Self::contract_node(node, graph, &mut contracted, &mut dijkstra, level, THRESHOLD);
             level += 1;
         }
 
@@ -205,6 +205,7 @@ impl<'a> CH<'a> {
 
     fn contract_independent_set(
         graph: &mut OffsetArray,
+        contracted: &mut Vec<bool>,
         dijkstra: &mut Dijkstra,
         indep_set: Vec<usize>,
         level: usize,
@@ -213,7 +214,7 @@ impl<'a> CH<'a> {
         let mut num_contracted = 0;
     
         for &node in &indep_set {
-            num_contracted += Self::contract_node(node, graph, dijkstra, level, threshold);
+            num_contracted += Self::contract_node(node, graph, contracted, dijkstra, level, threshold);
         }
     
         num_contracted
@@ -221,26 +222,27 @@ impl<'a> CH<'a> {
 
     fn contract_node(node: usize,
         graph: &mut OffsetArray,
+        contracted: &mut Vec<bool>,
         dijkstra: &mut Dijkstra,
         level: usize,
         threshold: i64) -> usize {
             let mut num_contracted = 0;
             let diff = Self::compute_edge_difference(node, graph);
             if diff <= threshold {
-                let shortcuts = Self::calc_shortcuts(node, graph, dijkstra);
+                let shortcuts = Self::calc_shortcuts(node, graph, contracted, dijkstra);
                 for (from, to, weight, edge_id_a, edge_id_b) in shortcuts {
                     // TODO: add shortcuts and patch graph
                     // graph.edges[from as usize].push(Edge::new(to, weight, Some(edge_id_a), Some(edge_id_b)));
                     // graph.adj_edges[to as usize].push(Edge::new(from, weight, Some(edge_id_a), Some(edge_id_b)));
                 }
                 graph.node_at_mut(node).level = level;
-                // TODO: Set node as contracted
+                contracted[node] = true;
                 num_contracted += 1;
             }
             num_contracted
     }
 
-    fn calc_shortcuts(node: usize, graph: &mut OffsetArray, dijkstra: &mut Dijkstra) -> Vec<Shortcut> {
+    fn calc_shortcuts(node: usize, graph: &mut OffsetArray, contracted: &Vec<bool>, dijkstra: &mut Dijkstra) -> Vec<Shortcut> {
         // (from, to, weight, edge_id_a, edge_id_b)
         let mut shortcuts : Vec<Shortcut> = Vec::new();
 
@@ -249,12 +251,11 @@ impl<'a> CH<'a> {
             for (edge_id_a, outgoing_edge) in graph.outgoing_edges(node).iter().enumerate() {
                 let outgoing_node = outgoing_edge.to;
 
-                // TODO:
-                // if graph.nodes[incoming_node as usize].contracted || graph.nodes[outgoing_node as usize].contracted {
-                //    continue;
-                // }
+                if contracted[incoming_node] || contracted[outgoing_node] {
+                    continue;
+                }
 
-                if let Some(shortest_path) = dijkstra.shortest_path(incoming_node, outgoing_node) {
+                if let Some(shortest_path) = dijkstra.shortest_path_consider_contraction(incoming_node,outgoing_node, contracted) {
                     let direct_distance = incoming_edge.weight + outgoing_edge.weight;
                     if shortest_path >= direct_distance {
                         shortcuts.push((incoming_node, outgoing_node, direct_distance, edge_id_a, edge_id_b));

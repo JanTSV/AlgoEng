@@ -12,14 +12,14 @@ fn main() {
     // Load graph with CH levels
     let start = Instant::now();
     println!("Started parsing...");
-    let graph = parse_graph("inputs/germany.fmi").unwrap();
+    let mut graph = parse_graph("inputs/MV.fmi").unwrap();
     let duration = start.elapsed();
     println!("Loaded graph in {:.2?}", duration);
 
-    // Test Dijkstra vs CH
+    // Dijkstra
     let mut dijkstra = Dijkstra::new(&graph);
-    const START: usize = 8371825;
-    const TARGET: usize = 16743651;
+    const START: usize = 214733;
+    const TARGET: usize = 429466;
     print!("Dijkstra: ");
     let start = Instant::now();
     let dijkstra_found = dijkstra.shortest_path(START, TARGET);
@@ -29,4 +29,27 @@ fn main() {
     }
     let duration = start.elapsed();
     println!("[{:.2?}]", duration);
+
+    // Preprocessing
+    let mut ch_graph = graph.clone();
+    let start = Instant::now();
+    println!("Started CH preprocessing...");
+    CH::batch_preprocess(&mut ch_graph);
+    let duration = start.elapsed();
+    println!("Preprocessed in {:.2?}", duration);
+
+    // TODO: maybe permutate and sort by level
+    
+    // CH
+    let mut ch = CH::new(&ch_graph);
+    print!("CH: ");
+    let start = Instant::now();
+    let dijkstra_found = dijkstra.shortest_path(START, TARGET);
+    match dijkstra_found {
+        Some(dist) => print!("Found a shortest path from {START} to {TARGET}: {dist} "),
+        None => print!("Did NOT find a path between {START} and {TARGET} ")
+    }
+    let duration = start.elapsed();
+    println!("[{:.2?}]", duration);
+
 }

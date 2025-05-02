@@ -46,6 +46,43 @@ impl<'a> Dijkstra<'a> {
         Self::new(graph)
     }
 
+    pub fn shortest_path_consider_contraction(&mut self, s: usize, t: usize, contracted: &Vec<bool>) -> Option<u64> {
+        // Cleanup of previous run
+        while let Some(node) = self.visited.pop() {
+            self.weights[node] = None;
+        }
+        self.heap.clear();
+
+        // Push start to heap and set dist to 0
+        self.heap.push(Distance::new(0, s));
+        self.weights[s] = Some(0);
+        self.visited.push(s);
+
+        while let Some(Distance { weight, id }) = self.heap.pop() {
+            if id == t {
+                return Some(weight);
+            }
+
+            if contracted[id] {
+                continue;
+            }
+
+            for edge in self.graph.outgoing_edges(id) {
+                if contracted[edge.to] {
+                    continue;
+                }
+
+                if self.weights[edge.to].is_none_or(|curr| weight + edge.weight < curr) {
+                    self.weights[edge.to] = Some(weight + edge.weight);
+                    self.heap.push(Distance::new(weight + edge.weight, edge.to));
+                    self.visited.push(edge.to);
+                }
+            }
+        }
+
+        None
+    }
+
     pub fn shortest_path(&mut self, s: usize, t: usize) -> Option<u64> {
         // Cleanup of previous run
         while let Some(node) = self.visited.pop() {

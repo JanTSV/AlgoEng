@@ -46,8 +46,8 @@ pub fn parse_graph(filename: &str) -> Result<OffsetArray, Box<dyn Error>> {
      }
  
      // Build edge lists
-     let mut edges: Vec<Vec<Edge>> = vec![Vec::new(); num_nodes as usize];
-     let mut reverse_edges: Vec<Vec<Edge>> = vec![Vec::new(); num_nodes as usize];
+     let mut edges: Vec<Vec<Edge>> = vec![Vec::new(); num_nodes];
+     let mut reverse_edges: Vec<Vec<Edge>> = vec![Vec::new(); num_nodes];
  
      for _ in 0..num_edges {
          let line = lines.next().ok_or("Missing edge line")?;
@@ -71,8 +71,8 @@ pub fn parse_graph(filename: &str) -> Result<OffsetArray, Box<dyn Error>> {
              None
          };
  
-         edges[source as usize].push(Edge::new(target, weight, edge_id_a, edge_id_b));
-         reverse_edges[target as usize].push(Edge::new(source, weight, edge_id_b, edge_id_a));
+         edges[source].push(Edge::new(target, weight, edge_id_a, edge_id_b));
+         reverse_edges[target].push(Edge::new(source, weight, edge_id_b, edge_id_a));
      }
  
 

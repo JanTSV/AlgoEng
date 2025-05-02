@@ -6,6 +6,7 @@ mod graph;
 mod reader;
 mod dijkstra;
 mod ch;
+mod perm;
 
 fn main() {
     // Load graph with CH levels

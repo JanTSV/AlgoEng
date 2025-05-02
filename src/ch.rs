@@ -145,6 +145,7 @@ mod test_ch {
     use std::time::Instant;
 
     use super::CH;
+    use crate::perm::Permutation;
     use crate::reader::parse_graph;
     use crate::dijkstra::Dijkstra;
 
@@ -175,6 +176,86 @@ mod test_ch {
         print!("CH (without stall-on-demand): ");
         let start = Instant::now();
         let ch_found = ch.shortest_path(START, TARGET, false);
+        match ch_found {
+            Some(dist) => print!("Found a shortest path from {START} to {TARGET}: {dist} "),
+            None => print!("Did NOT find a path between {START} and {TARGET} ")
+        }
+        let duration = start.elapsed();
+        println!("[{:.2?}]", duration);
+
+        assert_eq!(dijkstra_found, ch_found);
+    }
+
+    
+    #[test]
+    fn test_ch_with_stall_on_demand() {
+        // Load graph with CH levels
+        let start = Instant::now();
+        println!("Started parsing...");
+        let graph = parse_graph("inputs/stgtregbz_ch.fmi").unwrap();
+        let duration = start.elapsed();
+        println!("Loaded graph in {:.2?}", duration);
+
+        // Test Dijkstra vs CH
+        let mut dijkstra = Dijkstra::new(&graph);
+        const START: usize = 377371;
+        const TARGET: usize = 754742;
+        print!("Dijkstra: ");
+        let start = Instant::now();
+        let dijkstra_found = dijkstra.shortest_path(START, TARGET);
+        match dijkstra_found {
+            Some(dist) => print!("Found a shortest path from {START} to {TARGET}: {dist} "),
+            None => print!("Did NOT find a path between {START} and {TARGET} ")
+        }
+        let duration = start.elapsed();
+        println!("[{:.2?}]", duration);
+        let mut ch = CH::new(&graph);
+    
+        print!("CH (with stall-on-demand): ");
+        let start = Instant::now();
+        let ch_found = ch.shortest_path(START, TARGET, true);
+        match ch_found {
+            Some(dist) => print!("Found a shortest path from {START} to {TARGET}: {dist} "),
+            None => print!("Did NOT find a path between {START} and {TARGET} ")
+        }
+        let duration = start.elapsed();
+        println!("[{:.2?}]", duration);
+
+        assert_eq!(dijkstra_found, ch_found);
+    }
+
+    
+    #[test]
+    fn test_ch_with_stall_on_demand_and_sorted_by_level() {
+        // Load graph with CH levels
+        let start = Instant::now();
+        println!("Started parsing...");
+        let graph = parse_graph("inputs/stgtregbz_ch.fmi").unwrap();
+        let duration = start.elapsed();
+        println!("Loaded graph in {:.2?}", duration);
+
+        // Permutate graph
+        let perm = Permutation::by_level(&graph);
+        let graph = perm.permutate_graph(&graph);
+
+        // Test Dijkstra vs CH
+        let mut dijkstra = Dijkstra::new(&graph);
+        const START: usize = 377371;
+        const TARGET: usize = 754742;
+        print!("Dijkstra: ");
+        let start = Instant::now();
+        let dijkstra_found = dijkstra.shortest_path(perm.from(START), perm.from(TARGET));
+        match dijkstra_found {
+            Some(dist) => print!("Found a shortest path from {START} to {TARGET}: {dist} "),
+            None => print!("Did NOT find a path between {START} and {TARGET} ")
+        }
+        let duration = start.elapsed();
+        println!("[{:.2?}]", duration);
+        let mut ch = CH::new(&graph);
+    
+        print!("CH (with stall-on-demand): ");
+        let start = Instant::now();
+        let ch_found = ch.shortest_path(perm.from(START), perm.from(TARGET), true);
         match ch_found {
             Some(dist) => print!("Found a shortest path from {START} to {TARGET}: {dist} "),
             None => print!("Did NOT find a path between {START} and {TARGET} ")

@@ -131,7 +131,7 @@ impl OffsetArray {
                     None => "-1".to_string()
                 };
 
-                writeln!(file, "{} {} {} {} {} {} {}", i, edge.to, edge.weight, edge.typ, edge.max_speed, edge_id_a, edge_id_b);
+                writeln!(file, "{} {} {} {} {} {} {}", i, edge.to, edge.weight, edge.typ, edge.max_speed, edge_id_a, edge_id_b)?;
             }
         }
 

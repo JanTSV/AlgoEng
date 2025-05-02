@@ -188,22 +188,22 @@ impl CH {
     
         while contracted.iter().any(|&c| !c) {
             // Find independent set
-            let mut indep_set = Self::find_independent_set(&self.graph, &contracted);
-            // let mut indep_set = Self::_find_independent_set(&self.graph, &contracted);
+            //let mut indep_set = Self::find_independent_set(&self.graph, &contracted);
+            let mut indep_set = Self::_find_independent_set(&self.graph, &contracted);
             if indep_set.is_empty() {
                 break;
             }
 
             // Sort indep_set by edge difference
-            indep_set.sort_by_key(|x| x.1);
-            //indep_set.sort_by_key(|x| x.0);
+            //indep_set.sort_by_key(|x| x.1);
+            indep_set.sort_by_key(|x| x.0);
 
             // Threshold is such that 3/4th of indep_set get contracted
-            let threshold = indep_set[3 * indep_set.len() / 4].1;
-            //let threshold = indep_set[3 * indep_set.len() / 4].0;
+            //let threshold = indep_set[3 * indep_set.len() / 4].1;
+            let threshold = indep_set[3 * indep_set.len() / 4].0;
 
-            let (num_contracted, num_created, new_graph) = Self::contract_indep_set(&self.graph, &indep_set, level, threshold, &mut contracted);
-            //let (num_contracted, num_created, new_graph) = Self::_contract_indep_set(&self.graph, &indep_set, level, threshold, &mut contracted);
+            //let (num_contracted, num_created, new_graph) = Self::contract_indep_set(&self.graph, &indep_set, level, threshold, &mut contracted);
+            let (num_contracted, num_created, new_graph) = Self::_contract_indep_set(&self.graph, &indep_set, level, threshold, &mut contracted);
             
             if num_contracted == 0 {
                 break;
@@ -345,10 +345,7 @@ impl CH {
                 continue;
             }
 
-            let shortcuts = Self::calc_shortcuts(graph, node, contracted);
-            let edge_diff = shortcuts.len() as i64 - Self::_compute_edge_difference(node, graph, contracted) as i64;
-    
-            independent_set.push((edge_diff, node));
+            independent_set.push((Self::_compute_edge_difference(node, graph, contracted), node));
             // Block its neighbors from being selected
             for edge in graph.outgoing_edges(node) {
                 blocked[edge.to] = true;

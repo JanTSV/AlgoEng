@@ -28,7 +28,7 @@ fn main() {
     // Print out the graph
     let start = Instant::now();
     println!("Writing graph to file...");
-    ch.get_graph().to_file("graph.ch").unwrap();
+    // ch.get_graph().to_file("graph.ch").unwrap();
     let duration = start.elapsed();
     println!("Written in {:.2?}", duration);
 

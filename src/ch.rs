@@ -136,22 +136,26 @@ impl CH {
         shortcuts
     }
 
-    fn contract_node(graph: &OffsetArray, node: usize, level: usize, contracted: &mut Vec<bool>) -> OffsetArray {
+    fn contract_node(graph: &OffsetArray, node: usize, level: usize, contracted: &mut Vec<bool>) -> (usize, OffsetArray) {
         let (mut nodes, mut edges, mut reverse_edges) = graph.unflatten();
+        let mut num_created = 0;
 
         for (from, to, weight, edge_id_a, edge_id_b) in Self::calc_shortcuts(graph, node, contracted) {
             edges[from].push(Edge::new(to, weight, 0, -1, Some(edge_id_a), Some(edge_id_b)));
             reverse_edges[to].push(Edge::new(from, weight, 0, -1, None, None));
+
+            num_created += 1;
         }
 
         nodes[node].level = level;
         contracted[node] = true;
 
-        OffsetArray::build_from(nodes, edges, reverse_edges)
+        (num_created, OffsetArray::build_from(nodes, edges, reverse_edges))
     }
 
-    fn contract_indep_set(graph: &OffsetArray, indep_set: &Vec<(i64, usize)>, level: usize, threshold: i64, contracted: &mut Vec<bool>) -> (usize, OffsetArray) {
+    fn contract_indep_set(graph: &OffsetArray, indep_set: &Vec<(i64, usize)>, level: usize, threshold: i64, contracted: &mut Vec<bool>) -> (usize, usize, OffsetArray) {
         let mut shortcuts: Vec<(usize, Vec<Shortcut>)> = Vec::new();
+        let mut num_created = 0;
 
         // Calculate all shortcuts of elements in indep_set which are below threshold
         for (edge_diff, node) in indep_set {
@@ -168,6 +172,8 @@ impl CH {
             for (from, to, weight, edge_id_a, edge_id_b) in shortcut {
                 edges[from].push(Edge::new(to, weight, 0, -1, Some(edge_id_a), Some(edge_id_b)));
                 reverse_edges[to].push(Edge::new(from, weight, 0, -1, None, None));
+
+                num_created += 1;
             }
 
             //  Mark node as contracted and set level
@@ -175,13 +181,13 @@ impl CH {
             contracted[c] = true;
         }
 
-        (num_contracted, OffsetArray::build_from(nodes, edges, reverse_edges))
+        (num_contracted, num_created, OffsetArray::build_from(nodes, edges, reverse_edges))
     }
 
     pub fn batch_preprocess(&mut self) -> usize {
         let mut level = 0;
         let mut contracted = vec![false; self.graph.nodes.len()];
-        let mut overall_contracted = 0;
+        let mut num_shortcuts = 0;
     
         while contracted.iter().any(|&c| !c) {
             // Find independent set
@@ -196,31 +202,33 @@ impl CH {
             // Threshold is such that 3/4th of indep_set get contracted
             let threshold = indep_set[3 * indep_set.len() / 4].0;
 
-            let (num_contracted, new_graph) = Self::contract_indep_set(&self.graph, &indep_set, level, threshold, &mut contracted);
+            let (num_contracted, num_created, new_graph) = Self::contract_indep_set(&self.graph, &indep_set, level, threshold, &mut contracted);
             if num_contracted == 0 {
                 break;
             }
 
             // Use new graph in next iteration
             self.graph = new_graph;
-            println!("Contracted {} at level {}", num_contracted, level);
+            println!("Created {} at level {}", num_created, level);
 
-            overall_contracted += num_contracted;
+            num_shortcuts += num_created;
             level += 1;
         }
 
         // Contract nodes if there are any left
         for i in 0..contracted.len() {
             if !contracted[i] {
-                self.graph = Self::contract_node(&self.graph, i, level, &mut contracted);
-                overall_contracted += 1;
+                let (num_created, new_graph) = Self::contract_node(&self.graph, i, level, &mut contracted);
+                self.graph = new_graph;
+
+                num_shortcuts += num_created;
                 level += 1;
 
             }
         }
 
-        println!("#contracted: {}", overall_contracted);
-        overall_contracted
+        println!("#created: {}", num_shortcuts);
+        num_shortcuts
     }
 
     fn should_stall_forward(&self, node: usize) -> bool {

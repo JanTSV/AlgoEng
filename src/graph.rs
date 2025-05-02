@@ -54,6 +54,24 @@ impl OffsetArray {
         OffsetArray { offsets, reverse_offsets, nodes, edges, reverse_edges }
     }
 
+    pub fn unflatten(&self) -> (Vec<Node>, Vec<Vec<Edge>>, Vec<Vec<Edge>>) {
+        let num_nodes = self.nodes.len();
+        let mut edges: Vec<Vec<Edge>> = vec![Vec::new(); num_nodes];
+        let mut reverse_edges: Vec<Vec<Edge>> = vec![Vec::new(); num_nodes];
+
+        for i in 0..self.nodes.len() {
+            for edge in self.outgoing_edges(i) {
+                edges[i].push(edge.clone());
+            }
+
+            for edge in self.incoming_edges(i) {
+                reverse_edges[i].push(edge.clone());
+            }
+        }
+
+        (self.nodes.clone(), edges, reverse_edges)
+    }
+
     pub fn node_at(&self, idx: usize) -> &Node {
         &self.nodes[idx]
     }

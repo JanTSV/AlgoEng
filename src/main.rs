@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::{reader::parse_graph, dijkstra::Dijkstra, ch::CH};
+use crate::{reader::parse_graph, dijkstra::Dijkstra, ch::CH, perm::Permutation};
 
 mod graph;
 mod reader;
@@ -31,17 +31,17 @@ fn main() {
     println!("[{:.2?}]", duration);
 
     // Preprocessing
-    let mut ch_graph = graph.clone();
+    let mut ch = CH::new(graph);
+
     let start = Instant::now();
     println!("Started CH preprocessing...");
-    CH::batch_preprocess(&mut ch_graph);
+    ch.batch_preprocess();
     let duration = start.elapsed();
     println!("Preprocessed in {:.2?}", duration);
 
-    // TODO: maybe permutate and sort by level
+    // TODO: maybe permutate -> sort by level
     
     // CH
-    let mut ch = CH::new(&ch_graph);
     print!("CH: ");
     let start = Instant::now();
     let dijkstra_found = ch.shortest_path(START, TARGET, true);

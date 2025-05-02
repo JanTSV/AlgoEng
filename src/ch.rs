@@ -189,17 +189,22 @@ impl CH {
         while contracted.iter().any(|&c| !c) {
             // Find independent set
             let mut indep_set = Self::find_independent_set(&self.graph, &contracted);
+            // let mut indep_set = Self::_find_independent_set(&self.graph, &contracted);
             if indep_set.is_empty() {
                 break;
             }
 
             // Sort indep_set by edge difference
             indep_set.sort_by_key(|x| x.1);
+            //indep_set.sort_by_key(|x| x.0);
 
             // Threshold is such that 3/4th of indep_set get contracted
             let threshold = indep_set[3 * indep_set.len() / 4].1;
+            //let threshold = indep_set[3 * indep_set.len() / 4].0;
 
             let (num_contracted, num_created, new_graph) = Self::contract_indep_set(&self.graph, &indep_set, level, threshold, &mut contracted);
+            //let (num_contracted, num_created, new_graph) = Self::_contract_indep_set(&self.graph, &indep_set, level, threshold, &mut contracted);
+            
             if num_contracted == 0 {
                 break;
             }
@@ -212,7 +217,7 @@ impl CH {
             level += 1;
         }
 
-        // Contract nodes if there are any left
+        // Contract nodes if there are any left (a fallback jst in case, hopefully never)
         for i in 0..contracted.len() {
             if !contracted[i] {
                 let (num_created, new_graph) = Self::contract_node(&self.graph, i, level, &mut contracted);
@@ -292,13 +297,96 @@ impl CH {
                 blocked[edge.to] = true;
             }
         }
+
         independent_set
     }
 
     fn calc_edges_deleted(node: usize, graph: &OffsetArray) -> usize {
-        let incoming_edges = graph.outgoing_edges(node).len();
-        let outgoing_edges = graph.incoming_edges(node).len();
+        let incoming_edges = graph.incoming_edges(node).len();
+        let outgoing_edges = graph.outgoing_edges(node).len();
         incoming_edges + outgoing_edges
+    }
+
+
+    fn _contract_indep_set(graph: &OffsetArray, indep_set: &Vec<(i64, usize)>, level: usize, threshold: i64, contracted: &mut Vec<bool>) -> (usize, usize, OffsetArray) {
+        let mut num_created = 0;
+        let mut num_contracted = 0;
+
+
+        // Create a new graph with the shortcuts
+        let (mut nodes, mut edges, mut reverse_edges) = graph.unflatten();
+        for (edge_diff, node) in indep_set {
+            if *edge_diff <= threshold {
+                let shortcuts = Self::calc_shortcuts(graph, *node, contracted);
+                for (from, to, weight, edge_id_a, edge_id_b) in shortcuts {
+                    // Add shortcuts
+                    edges[from].push(Edge::new(to, weight, 0, -1, Some(edge_id_a), Some(edge_id_b)));
+                    reverse_edges[to].push(Edge::new(from, weight, 0, -1, None, None));
+
+                    num_created += 1;
+                } 
+
+                //  Mark node as contracted and set level
+                nodes[*node].level = level;
+                contracted[*node] = true;
+                num_contracted += 1;
+            }
+        }
+
+        (num_contracted, num_created, OffsetArray::build_from(nodes, edges, reverse_edges))
+    }
+    
+    fn _find_independent_set(graph: &OffsetArray, contracted: &Vec<bool>) -> Vec<(i64, usize)> {
+        let mut independent_set: Vec<(i64, usize)> = Vec::new();
+        let mut blocked = vec![false; graph.nodes.len()];
+    
+        for node in 0..graph.nodes.len() {
+            if contracted[node] || blocked[node] {
+                continue;
+            }
+
+            let shortcuts = Self::calc_shortcuts(graph, node, contracted);
+            let edge_diff = shortcuts.len() as i64 - Self::_compute_edge_difference(node, graph, contracted) as i64;
+    
+            independent_set.push((edge_diff, node));
+            // Block its neighbors from being selected
+            for edge in graph.outgoing_edges(node) {
+                blocked[edge.to] = true;
+            }
+            for edge in graph.incoming_edges(node) {
+                blocked[edge.to] = true;
+            }
+        }
+
+        independent_set
+    }
+
+    fn _compute_edge_difference(node: usize, graph: &OffsetArray, contracted: &Vec<bool>) -> i64 {
+        let mut shortcuts = 0;
+    
+        let incoming_edges = graph.incoming_edges(node);
+        let outgoing_edges = graph.outgoing_edges(node);
+    
+        for in_edge in incoming_edges {
+            let from = in_edge.to;
+            if contracted[from] {
+                continue;
+            }
+    
+            for out_edge in outgoing_edges {
+                let to = out_edge.to;
+                if contracted[to] {
+                    continue;
+                }
+    
+                shortcuts += 1;
+            }
+        }
+    
+        // Number of edges deleted = all incident edges (incoming + outgoing)
+        let edges_deleted = incoming_edges.len() + outgoing_edges.len();
+    
+        shortcuts as i64 - edges_deleted as i64
     }
 }
 

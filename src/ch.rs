@@ -1,0 +1,187 @@
+use std::collections::BinaryHeap;
+
+use crate::graph::OffsetArray;
+use crate::dijkstra::Distance;
+
+pub struct CH<'a> {
+    graph: &'a OffsetArray,
+
+    // s -> t
+    distances: Vec<Option<u64>>,
+    heap: BinaryHeap<Distance>,
+    visited: Vec<usize>,
+
+    // t -> s
+    incoming_distances: Vec<Option<u64>>,
+    incoming_heap: BinaryHeap<Distance>
+}
+
+impl<'a> CH<'a> {
+    pub fn new(graph: &'a OffsetArray) -> Self {
+        CH { graph, 
+             distances: vec![None; graph.nodes.len()], 
+             heap: BinaryHeap::new(), 
+             visited: Vec::new(),
+             incoming_distances: vec![None; graph.nodes.len()], 
+             incoming_heap: BinaryHeap::new()
+        }
+    }
+
+    pub fn shortest_path(&mut self, s: usize, t: usize, stall_on_demand: bool) -> Option<u64> {
+        // Cleanup of previous run
+        while let Some(node) = self.visited.pop() {
+            self.distances[node] = None;
+            self.incoming_distances[node] = None;
+        }
+
+        self.heap.clear();
+        self.incoming_heap.clear();
+
+        // Push s and t to heaps and set dists to 0
+        self.heap.push(Distance::new(0, s));
+        self.distances[s] = Some(0);
+        self.visited.push(s);
+
+        self.incoming_heap.push(Distance::new(0, t));
+        self.incoming_distances[t] = Some(0);
+        self.visited.push(t);
+
+        while !self.heap.is_empty() || !self.incoming_heap.is_empty() {
+            // Dijkstra from s
+            if let Some(Distance { weight, id }) = self.heap.pop() {
+                // Stall-on-demand
+                if stall_on_demand && self.should_stall_forward(id) {
+                    continue;
+                }
+
+                for edge in self.graph.outgoing_edges(id) {
+                    // println!("CURRENT: {} {} EDGE: {} {}", id, self.graph.1[id].level, edge.to, self.graph.1[edge.to].level);
+                    if self.distances[edge.to].is_none_or(|curr| weight + edge.weight < curr) && 
+                       self.graph.nodes[edge.to].level > self.graph.nodes[id].level {
+                        self.distances[edge.to] = Some(weight + edge.weight);
+                        self.heap.push(Distance::new(weight + edge.weight, edge.to));
+                        self.visited.push(edge.to);
+                    }
+                }
+            }
+
+            // Dijkstra from t
+            if let Some(Distance { weight, id }) = self.incoming_heap.pop() {
+                // Stall-on-demand
+                if stall_on_demand && self.should_stall_backward(id) {
+                    continue;
+                }
+
+                for edge in self.graph.incoming_edges(id) {
+                    if self.incoming_distances[edge.to].is_none_or(|curr| weight + edge.weight < curr) && 
+                       self.graph.nodes[edge.to].level > self.graph.nodes[id].level {
+                        self.incoming_distances[edge.to] = Some(weight + edge.weight);
+                        self.incoming_heap.push(Distance::new(weight + edge.weight, edge.to));
+                        self.visited.push(edge.to);
+                    }
+                }
+            }
+        }
+
+        // Get minimal connecting node
+        let mut distance: Option<u64> = None;
+        for v in &self.visited {
+            match (distance, self.distances[*v], self.incoming_distances[*v]) {
+                (None, Some(d0), Some(d1)) => distance = Some(d0 + d1),
+                (Some(d), Some(d0), Some(d1)) if d0 + d1 < d => distance = Some(d0 + d1),
+                _ => continue
+            }
+        }
+
+        distance
+    }
+
+    fn should_stall_forward(&self, node: usize) -> bool {
+        let node_level = self.graph.nodes[node].level;
+        let node_dist = match self.distances[node] {
+            Some(d) => d,
+            None => return false,
+        };
+
+        for edge in self.graph.incoming_edges(node) {
+            let neighbor_level = self.graph.nodes[edge.to].level;
+
+            // Only consider neighbors with higher level
+            if neighbor_level > node_level {
+                if let Some(alt_dist) = self.distances[edge.to] {
+                    if alt_dist + edge.weight < node_dist {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn should_stall_backward(&self, node: usize) -> bool {
+        let node_level = self.graph.nodes[node].level;
+        let node_dist = match self.incoming_distances[node] {
+            Some(d) => d,
+            None => return false,
+        };
+
+        for edge in self.graph.outgoing_edges(node) {
+            let neighbor_level = self.graph.nodes[edge.to].level;
+
+            if neighbor_level > node_level {
+                if let Some(alt_dist) = self.incoming_distances[edge.to] {
+                    if alt_dist + edge.weight < node_dist {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+}
+
+#[cfg(test)]
+mod test_ch {
+    use std::time::Instant;
+
+    use super::CH;
+    use crate::reader::parse_graph;
+    use crate::dijkstra::Dijkstra;
+
+    #[test]
+    fn test_ch_without_stall_on_demand() {
+        // Load graph with CH levels
+        let start = Instant::now();
+        println!("Started parsing...");
+        let graph = parse_graph("inputs/stgtregbz_ch.fmi").unwrap();
+        let duration = start.elapsed();
+        println!("Loaded graph in {:.2?}", duration);
+
+        // Test Dijkstra vs CH
+        let mut dijkstra = Dijkstra::new(&graph);
+        const START: usize = 377371;
+        const TARGET: usize = 754742;
+        print!("Dijkstra: ");
+        let start = Instant::now();
+        let dijkstra_found = dijkstra.shortest_path(START, TARGET);
+        match dijkstra_found {
+            Some(dist) => print!("Found a shortest path from {START} to {TARGET}: {dist} "),
+            None => print!("Did NOT find a path between {START} and {TARGET} ")
+        }
+        let duration = start.elapsed();
+        println!("[{:.2?}]", duration);
+        let mut ch = CH::new(&graph);
+    
+        print!("CH (without stall-on-demand): ");
+        let start = Instant::now();
+        let ch_found = ch.shortest_path(START, TARGET, false);
+        match ch_found {
+            Some(dist) => print!("Found a shortest path from {START} to {TARGET}: {dist} "),
+            None => print!("Did NOT find a path between {START} and {TARGET} ")
+        }
+        let duration = start.elapsed();
+        println!("[{:.2?}]", duration);
+
+        assert_eq!(dijkstra_found, ch_found);
+    }
+}

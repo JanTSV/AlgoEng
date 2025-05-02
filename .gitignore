@@ -1,7 +1,7 @@
 /target
 /inputs/germany.fmi
+/inputs/stgtregbz_ch.fmi
 output.txt
-stgtregbz_ch.fmi
 dump.txt
 DistTables/
 .DS_Store

@@ -195,7 +195,7 @@ impl CH {
             level += 1;
         }
 
-        println!("#created: {}", num_shortcuts);
+        println!("#created: {}, #edges in new graph: {}", num_shortcuts, self.graph.num_edges());
         num_shortcuts
     }
 
@@ -264,6 +264,7 @@ impl CH {
             }
         }
 
+        // Sort independent set
         independent_set.sort_by_key(|x| x.0);
         independent_set
     }

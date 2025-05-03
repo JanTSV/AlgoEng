@@ -208,6 +208,10 @@ impl OffsetArray {
          &self.reverse_edges[self.reverse_offsets[idx]..self.reverse_offsets[idx + 1]]
     }
 
+    pub fn num_edges(&self) -> usize {
+        *self.offsets.last().unwrap()
+    }
+
     pub fn to_file(&self, filename: &str) -> Result<(), Box<dyn Error>> {
         let mut file = OpenOptions::new()
             .write(true)
@@ -227,7 +231,7 @@ impl OffsetArray {
         writeln!(file, "{}", self.nodes.len())?;
 
         // #edges
-        writeln!(file, "{}", self.offsets.last().unwrap())?;
+        writeln!(file, "{}", self.num_edges())?;
 
         // Print nodes: <ID> <OSMID> <Lat> <Lon> <Height> <Level>
         for (id, node) in self.nodes.iter().enumerate() {

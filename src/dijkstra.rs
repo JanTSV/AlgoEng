@@ -38,12 +38,7 @@ pub struct Dijkstra<'a> {
 
 impl<'a> Dijkstra<'a> {
     pub fn new(graph: &'a OffsetArray) -> Self {
-        Dijkstra { graph, weights: vec![None; graph.nodes.len()], heap: BinaryHeap::new(), visited: Vec::new() }
-    }
-
-    pub fn unsafe_new(graph: *const OffsetArray) -> Self {
-        let graph = unsafe { &*graph };
-        Self::new(graph)
+        Dijkstra { graph, weights: vec![None; graph.nodes_num()], heap: BinaryHeap::new(), visited: Vec::new() }
     }
 
     pub fn shortest_path_consider_contraction(&mut self, s: usize, t: usize, contracted: &Vec<bool>) -> Option<u64> {

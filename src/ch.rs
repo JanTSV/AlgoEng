@@ -23,7 +23,7 @@ pub struct CH {
 
 impl CH {
     pub fn new(graph: OffsetArray) -> Self {
-        let n = graph.nodes.len();
+        let n = graph.nodes_num();
         CH { graph, 
              distances: vec![None; n], 
              heap: BinaryHeap::new(), 
@@ -35,10 +35,6 @@ impl CH {
 
     pub fn get_graph(&self) -> &OffsetArray {
         &self.graph
-    }
-
-    pub fn set_graph(&mut self, graph: OffsetArray) {
-        self.graph = graph
     }
 
     pub fn shortest_path(&mut self, s: usize, t: usize, stall_on_demand: bool) -> Option<u64> {
@@ -70,7 +66,7 @@ impl CH {
 
                 for edge in self.graph.outgoing_edges(id) {
                     if self.distances[edge.to].is_none_or(|curr| weight + edge.weight < curr) && 
-                       self.graph.nodes[edge.to].level > self.graph.nodes[id].level {
+                       self.graph.node_at(edge.to).level > self.graph.node_at(id).level {
                         self.distances[edge.to] = Some(weight + edge.weight);
                         self.heap.push(Distance::new(weight + edge.weight, edge.to));
                         self.visited.push(edge.to);
@@ -86,11 +82,11 @@ impl CH {
                 }
 
                 for edge in self.graph.incoming_edges(id) {
-                    if self.incoming_distances[edge.from].is_none_or(|curr| weight + edge.weight < curr) && 
-                       self.graph.nodes[edge.from].level > self.graph.nodes[id].level {
-                        self.incoming_distances[edge.from] = Some(weight + edge.weight);
-                        self.incoming_heap.push(Distance::new(weight + edge.weight, edge.from));
-                        self.visited.push(edge.from);
+                    if self.incoming_distances[edge.to].is_none_or(|curr: u64| weight + edge.weight < curr) && 
+                       self.graph.node_at(edge.to).level > self.graph.node_at(id).level {
+                        self.incoming_distances[edge.to] = Some(weight + edge.weight);
+                        self.incoming_heap.push(Distance::new(weight + edge.weight, edge.to));
+                        self.visited.push(edge.to);
                     }
                 }
             }
@@ -109,14 +105,14 @@ impl CH {
         distance
     }
 
-    fn calc_shortcuts(graph: &OffsetArray, node: usize, contracted: &Vec<bool>) -> Vec<Shortcut> {
+    fn calc_shortcuts(&self, node: usize, contracted: &Vec<bool>) -> Vec<Shortcut> {
         // (from, to, weight, edge_id_a, edge_id_b)
         let mut shortcuts: Vec<Shortcut> = Vec::new();
-        let mut dijkstra = Dijkstra::new(graph);
+        let mut dijkstra = Dijkstra::new(&self.graph);
 
-        for (edge_id_b, incoming_edge) in graph.incoming_edges(node).iter().enumerate() {
-            let incoming_node = incoming_edge.from;
-            for (edge_id_a, outgoing_edge) in graph.outgoing_edges(node).iter().enumerate() {
+        for (edge_id_b, incoming_edge) in self.graph.incoming_edges(node).iter().enumerate() {
+            let incoming_node = incoming_edge.to;
+            for (edge_id_a, outgoing_edge) in self.graph.outgoing_edges(node).iter().enumerate() {
                 let outgoing_node = outgoing_edge.to;
 
                 if contracted[incoming_node] || contracted[outgoing_node] {
@@ -138,94 +134,65 @@ impl CH {
         shortcuts
     }
 
-    fn contract_node(graph: &mut OffsetArray, node: usize, level: usize, contracted: &mut Vec<bool>) -> usize {
-        let mut num_created = 0;
-
-        for (from, to, weight, edge_id_a, edge_id_b) in Self::calc_shortcuts(graph, node, contracted) {
-            
-            graph.add_edge(Edge::new(from, to, weight, 0, -1, Some(edge_id_a), Some(edge_id_b)));
-            num_created += 1;
-        }
-
-        graph.node_at_mut(node).level = level;
-        contracted[node] = true;
-
-        graph.build_offsets();
-        num_created
-    }
-
-    fn contract_indep_set(graph: &mut OffsetArray, indep_set: &Vec<(Vec<Shortcut>, i64, usize)>, level: usize, threshold: i64, contracted: &mut Vec<bool>) -> (usize, usize) {
+    fn contract_indep_set(
+        &mut self,
+        indep_set: &Vec<(i64, usize)>,
+        level: usize,
+        contracted: &mut Vec<bool>
+    ) -> (usize, usize) {
+    
+        // Compute shortcuts for part of independent set with low edge diff
+        let n = indep_set.len().div_ceil(6);
+        let results: Vec<_> = indep_set
+            .par_iter()
+            .take(n)
+            .map(|&(_, node)| {
+                let shortcuts = self.calc_shortcuts(node, contracted);
+                (node, shortcuts)
+            })
+            .collect();
+    
         let mut num_created = 0;
         let mut num_contracted = 0;
-
-
-        // Create a new graph with the shortcuts
-        for (shortcut, edge_diff, c) in indep_set {
-            if *edge_diff <= threshold {
-                // Add shortcuts
-                for (from, to, weight, edge_id_a, edge_id_b) in shortcut {
-                    graph.add_edge(Edge::new(*from, *to, *weight, 0, -1, Some(*edge_id_a), Some(*edge_id_b)));
-
-                    num_created += 1;
-                }
-
-                //  Mark node as contracted and set level
-                graph.node_at_mut(*c).level = level;
-                contracted[*c] = true;
-                num_contracted += 1;
+    
+        // Add shortcuts
+        for (node, shortcuts) in results {
+            for (from, to, weight, edge_id_a, edge_id_b) in shortcuts {
+                self.graph.add_edge(Edge::new(from, to, weight, 0, -1, Some(edge_id_a), Some(edge_id_b)));
+                num_created += 1;
             }
             
+            self.graph.node_at_mut(node).level = level;
+            contracted[node] = true;
+            num_contracted += 1;
         }
 
-        graph.build_offsets();
-
+        // Rebuild graph offsets
+        self.graph.build_offsets();
+    
         (num_contracted, num_created)
     }
 
     pub fn batch_preprocess(&mut self) -> usize {
         let mut level = 0;
-        let mut contracted = vec![false; self.graph.nodes.len()];
+        let mut contracted = vec![false; self.graph.nodes_num()];
         let mut num_shortcuts = 0;
     
-        while contracted.iter().any(|&c| !c) {
+        loop {
             // Find independent set
-            //let mut indep_set = Self::find_independent_set(&self.graph, &contracted);
-            let mut indep_set = Self::_find_independent_set(&self.graph, &contracted);
+            let indep_set = self.find_independent_set(&contracted);
             if indep_set.is_empty() {
                 break;
             }
 
-            // Sort indep_set by edge difference
-            //indep_set.sort_by_key(|x| x.1);
-            indep_set.sort_by_key(|x| x.0);
-
-            // Threshold is such that 3/4th of indep_set get contracted
-            //let threshold = indep_set[3 * indep_set.len() / 4].1;
-            let threshold = indep_set[3 * indep_set.len() / 4].0;
-
-            //let (num_contracted, num_created, new_graph) = Self::contract_indep_set(&self.graph, &indep_set, level, threshold, &mut contracted);
-            let (num_contracted, num_created) = Self::_contract_indep_set(&mut self.graph, &indep_set, level, threshold, &mut contracted);
-            
-            if num_contracted == 0 {
-                break;
-            }
-
-            // Use new graph in next iteration
-            println!("Created {} / Contracted {} at level {}", num_created, num_contracted, level);
-
+            // Contract part of independent set with low edge diff
+            let (num_contracted, num_created) = self.contract_indep_set(&indep_set, level, &mut contracted);
             num_shortcuts += num_created;
+            
+            println!("Created {} / Contracted {} at level {}", num_shortcuts, num_contracted, level);
+
+            // Increase level for next independent set
             level += 1;
-        }
-
-        // Contract nodes if there are any left (a fallback jst in case, hopefully never)
-        for i in 0..contracted.len() {
-            if !contracted[i] {
-                let num_created = Self::contract_node(&mut self.graph, i, level, &mut contracted);
-
-                num_shortcuts += num_created;
-                level += 1;
-
-            }
         }
 
         println!("#created: {}", num_shortcuts);
@@ -233,18 +200,18 @@ impl CH {
     }
 
     fn should_stall_forward(&self, node: usize) -> bool {
-        let node_level = self.graph.nodes[node].level;
+        let node_level = self.graph.node_at(node).level;
         let node_dist = match self.distances[node] {
             Some(d) => d,
             None => return false,
         };
 
         for edge in self.graph.incoming_edges(node) {
-            let neighbor_level = self.graph.nodes[edge.from].level;
+            let neighbor_level = self.graph.node_at(edge.to).level;
 
             // Only consider neighbors with higher level
             if neighbor_level > node_level {
-                if let Some(alt_dist) = self.distances[edge.from] {
+                if let Some(alt_dist) = self.distances[edge.to] {
                     if alt_dist + edge.weight < node_dist {
                         return true;
                     }
@@ -255,14 +222,14 @@ impl CH {
     }
 
     fn should_stall_backward(&self, node: usize) -> bool {
-        let node_level = self.graph.nodes[node].level;
+        let node_level = self.graph.node_at(node).level;
         let node_dist = match self.incoming_distances[node] {
             Some(d) => d,
             None => return false,
         };
 
         for edge in self.graph.outgoing_edges(node) {
-            let neighbor_level = self.graph.nodes[edge.to].level;
+            let neighbor_level = self.graph.node_at(edge.to).level;
 
             if neighbor_level > node_level {
                 if let Some(alt_dist) = self.incoming_distances[edge.to] {
@@ -275,125 +242,30 @@ impl CH {
         false
     }
     
-    fn find_independent_set(graph: &OffsetArray, contracted: &Vec<bool>) -> Vec<(Vec<Shortcut>, i64, usize)> {
-        let mut independent_set: Vec<(Vec<Shortcut>, i64, usize)> = Vec::new();
-        let mut blocked = vec![false; graph.nodes.len()];
-    
-        for node in 0..graph.nodes.len() {
-            if contracted[node] || blocked[node] {
-                continue;
-            }
-
-            let shortcuts = Self::calc_shortcuts(graph, node, contracted);
-            let edge_diff = shortcuts.len() as i64 - Self::calc_edges_deleted(node, graph) as i64;
-    
-            independent_set.push((shortcuts, edge_diff, node));
-            // Block its neighbors from being selected
-            for edge in graph.outgoing_edges(node) {
-                blocked[edge.to] = true;
-            }
-            for edge in graph.incoming_edges(node) {
-                blocked[edge.from] = true;
-            }
-        }
-
-        independent_set
-    }
-
-    fn calc_edges_deleted(node: usize, graph: &OffsetArray) -> usize {
-        let incoming_edges = graph.incoming_edges(node).len();
-        let outgoing_edges = graph.outgoing_edges(node).len();
-        incoming_edges + outgoing_edges
-    }
-
-
-    fn _contract_indep_set(
-        graph: &mut OffsetArray,
-        indep_set: &Vec<(i64, usize)>,
-        level: usize,
-        threshold: i64,
-        contracted: &mut Vec<bool>
-    ) -> (usize, usize) {
-    
-        // Step 1: Compute shortcut additions in parallel
-        let results: Vec<_> = indep_set
-            .par_iter()
-            .filter(|&&(edge_diff, _)| edge_diff <= threshold)
-            .map(|&(_, node)| {
-                let shortcuts = Self::calc_shortcuts(graph, node, contracted);
-                (node, shortcuts)
-            })
-            .collect();
-    
-        let mut num_created = 0;
-        let mut num_contracted = 0;
-    
-        // Step 2: Apply the modifications sequentially
-        for (node, shortcuts) in results {
-            for (from, to, weight, edge_id_a, edge_id_b) in shortcuts {
-                graph.add_edge(Edge::new(from, to, weight, 0, -1, Some(edge_id_a), Some(edge_id_b)));
-                num_created += 1;
-            }
-            
-            graph.node_at_mut(node).level = level;
-            contracted[node] = true;
-            num_contracted += 1;
-        }
-
-        // Rebuild graph offsets
-        graph.build_offsets();
-    
-        (num_contracted, num_created)
-    }
-    
-    fn _find_independent_set(graph: &OffsetArray, contracted: &Vec<bool>) -> Vec<(i64, usize)> {
+    fn find_independent_set(&self, contracted: &Vec<bool>) -> Vec<(i64, usize)> {
         let mut independent_set: Vec<(i64, usize)> = Vec::new();
-        let mut blocked = vec![false; graph.nodes.len()];
+        let mut blocked = vec![false; self.graph.nodes_num()];
     
-        for node in 0..graph.nodes.len() {
+        for node in 0..self.graph.nodes_num() {
             if contracted[node] || blocked[node] {
                 continue;
             }
 
-            independent_set.push((Self::_compute_edge_difference(node, graph, contracted), node));
+            let incoming_num = self.graph.incoming_edges(node).len() as i64; 
+            let outgoing_num = self.graph.outgoing_edges(node).len() as i64; 
+
+            independent_set.push((incoming_num * outgoing_num - incoming_num - outgoing_num, node));
             // Block its neighbors from being selected
-            for edge in graph.outgoing_edges(node) {
+            for edge in self.graph.outgoing_edges(node) {
                 blocked[edge.to] = true;
             }
-            for edge in graph.incoming_edges(node) {
-                blocked[edge.from] = true;
+            for edge in self.graph.incoming_edges(node) {
+                blocked[edge.to] = true;
             }
         }
 
+        independent_set.sort_by_key(|x| x.0);
         independent_set
-    }
-
-    fn _compute_edge_difference(node: usize, graph: &OffsetArray, contracted: &Vec<bool>) -> i64 {
-        let mut shortcuts = 0;
-    
-        let incoming_edges = graph.incoming_edges(node);
-        let outgoing_edges = graph.outgoing_edges(node);
-    
-        for in_edge in incoming_edges {
-            let from = in_edge.from;
-            if contracted[from] {
-                continue;
-            }
-    
-            for out_edge in outgoing_edges {
-                let to = out_edge.to;
-                if contracted[to] {
-                    continue;
-                }
-    
-                shortcuts += 1;
-            }
-        }
-    
-        // Number of edges deleted = all incident edges (incoming + outgoing)
-        let edges_deleted = incoming_edges.len() + outgoing_edges.len();
-    
-        shortcuts as i64 - edges_deleted as i64
     }
 }
 

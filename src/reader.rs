@@ -2,8 +2,6 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::error::Error;
 
-use crate::graph::{Node, Edge, OffsetArray};
-
 
 pub fn parse_queries(filename: &str) -> Result<Vec<(usize, usize)>, Box<dyn Error>> {
     let file = File::open(filename)?;
@@ -31,7 +29,7 @@ pub fn parse_queries(filename: &str) -> Result<Vec<(usize, usize)>, Box<dyn Erro
 #[cfg(test)]
 mod reader_tests {
     use super::parse_queries;
-    
+
     #[test]
     fn test_parse_querries() {
         let queries = parse_queries("inputs/queries.txt").unwrap();

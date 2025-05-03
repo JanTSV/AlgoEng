@@ -39,15 +39,15 @@ impl Node {
 #[derive(Debug, Clone)]
 pub struct OffsetArray {
     // Offsets
-    pub offsets: Vec<usize>,
-    pub reverse_offsets: Vec<usize>,
+    offsets: Vec<usize>,
+    reverse_offsets: Vec<usize>,
     
     // Nodes
-    pub nodes: Vec<Node>,
+    nodes: Vec<Node>,
 
     // Edges
-    pub edges: Vec<Edge>,
-    pub reverse_edges: Vec<Edge>
+    edges: Vec<Edge>,
+    reverse_edges: Vec<Edge>
 }
 
 impl OffsetArray {
@@ -121,6 +121,20 @@ impl OffsetArray {
             graph.edges.push(Edge::new(source, target, weight, typ, max_speed, edge_id_a, edge_id_b));
         }
 
+        // Clone reverse edges with to and from swapped        
+        graph.reverse_edges = graph.edges
+            .iter()
+            .map(|e| Edge::new(
+                e.to,
+                e.from,
+                e.weight,
+                e.typ,
+                e.max_speed,
+                e.edge_id_a,
+                e.edge_id_b,
+            ))
+            .collect();
+
        graph.build_offsets();
 
         assert_eq!(num_nodes, graph.nodes.len());
@@ -132,13 +146,22 @@ impl OffsetArray {
         Ok(graph)
     }
 
+    pub fn nodes_num(&self) -> usize {
+        self.nodes.len()
+    } 
+
     pub fn add_edge(&mut self, edge: Edge) {
-        self.edges.push(edge.clone());
-        self.reverse_edges.push(edge);
+        let rev_edge = Edge::new(edge.to, edge.from, edge.weight, edge.typ, edge.max_speed, edge.edge_id_a, edge.edge_id_b); 
+        self.edges.push(edge);
+        self.reverse_edges.push(rev_edge);
     }
 
     pub fn build_offsets(&mut self) {
-        let num_nodes = self.nodes.len();
+        let num_nodes = self.nodes_num();
+
+        // Clear old offsets
+        self.offsets.clear();
+        self.reverse_offsets.clear();
 
         // Sort edges and create offset array
         self.edges.sort_by_key(|edge| edge.from);
@@ -153,13 +176,12 @@ impl OffsetArray {
         self.offsets.push(current_offset);
 
         // Same for reverse edges.
-        self.reverse_edges = self.edges.iter().cloned().collect();
-        self.reverse_edges.sort_by_key(|edge| edge.to);
+        self.reverse_edges.sort_by_key(|edge| edge.from);
 
         let mut current_offset = 0;
         for node_id in 0..num_nodes {
             self.reverse_offsets.push(current_offset);
-            while current_offset < self.reverse_edges.len() && self.reverse_edges[current_offset].to == node_id {
+            while current_offset < self.reverse_edges.len() && self.reverse_edges[current_offset].from == node_id {
                 current_offset += 1;
             }
         }
@@ -233,22 +255,6 @@ impl OffsetArray {
 
         Ok(())
     }
-
-    fn flatten(edge_list: Vec<Vec<Edge>>) -> (Vec<Edge>, Vec<usize>) {
-        let mut flat_edges: Vec<Edge> = Vec::new();
-        let mut offsets: Vec<usize> = Vec::new();
-        let mut current_offset: usize = 0;
-
-        offsets.push(current_offset);
-
-        for edges in edge_list {
-            current_offset += edges.len();
-            offsets.push(current_offset);
-            flat_edges.extend(edges);
-        }
-
-        (flat_edges, offsets)
-    }
 }
 
 #[cfg(test)]
@@ -262,6 +268,8 @@ mod test_offset_array {
         assert_eq!(graph.edges.len(), 9);
         assert_eq!(graph.offsets.len(), 6);
         assert_eq!(graph.reverse_offsets.len(), 6);
+
+        println!("{:?}", graph);
     }
     
     #[test]

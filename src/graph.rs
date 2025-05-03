@@ -1,9 +1,12 @@
 use std::{fs::OpenOptions, error::Error};
 use std::io::Write;
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 
 
 #[derive(Debug, Clone)]
 pub struct Edge {
+    pub from: usize,
     pub to: usize,
     pub weight: u64,
     pub typ: u64,
@@ -13,8 +16,8 @@ pub struct Edge {
 }
 
 impl Edge {
-    pub fn new(to: usize, weight: u64, typ: u64, max_speed: i64, edge_id_a: Option<usize>, edge_id_b: Option<usize>) -> Self {
-        Edge { to, weight, typ, max_speed, edge_id_a, edge_id_b }
+    pub fn new(from: usize, to: usize, weight: u64, typ: u64, max_speed: i64, edge_id_a: Option<usize>, edge_id_b: Option<usize>) -> Self {
+        Edge { from, to, weight, typ, max_speed, edge_id_a, edge_id_b }
     }
 }
 
@@ -48,33 +51,123 @@ pub struct OffsetArray {
 }
 
 impl OffsetArray {
-    pub fn build_from(nodes: Vec<Node>, edges: Vec<Vec<Edge>>, reverse_edges: Vec<Vec<Edge>>) -> Self {
-        assert_eq!(nodes.len(), edges.len());
-        assert_eq!(nodes.len(), reverse_edges.len());
+    pub fn from_file(filename: &str) -> Result<Self, Box<dyn Error>> {
+        let file = File::open(filename)?;
+        let reader = BufReader::new(file);
 
-        let (edges, offsets) = Self::flatten(edges);
-        assert_eq!(offsets.len(), nodes.len() + 1);
-        let (reverse_edges, reverse_offsets) = Self::flatten(reverse_edges);
-        assert_eq!(reverse_offsets.len(), nodes.len() + 1);
-        OffsetArray { offsets, reverse_offsets, nodes, edges, reverse_edges }
-    }
+        // Filter out comments and empty lines
+        let mut lines = reader
+            .lines()
+            .map_while(Result::ok)
+            .map(|line| line.trim().to_string())
+            .filter(|line| !line.is_empty() && !line.starts_with('#'));
 
-    pub fn unflatten(&self) -> (Vec<Node>, Vec<Vec<Edge>>, Vec<Vec<Edge>>) {
-        let num_nodes = self.nodes.len();
-        let mut edges: Vec<Vec<Edge>> = vec![Vec::new(); num_nodes];
-        let mut reverse_edges: Vec<Vec<Edge>> = vec![Vec::new(); num_nodes];
+        // Parse number of nodes and edges
+        let num_nodes: usize = lines.next().ok_or("Missing number of nodes")?.parse()?;
+        let num_edges: usize = lines.next().ok_or("Missing number of edges")?.parse()?;
 
-        for i in 0..self.nodes.len() {
-            for edge in self.outgoing_edges(i) {
-                edges[i].push(edge.clone());
+        let mut graph = Self::new(num_nodes, num_edges);
+
+        // Parse nodes
+        for _i in 0..num_nodes {
+            let line = lines.next().ok_or("Missing edge line")?;
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            
+            if parts.len() < 5 {
+                return Err(format!("Malformed node line {}, parts: {}", line, parts.len()).into());
             }
-
-            for edge in self.incoming_edges(i) {
-                reverse_edges[i].push(edge.clone());
-            }
+    
+            let id: usize = parts[0].parse()?;
+            assert_eq!(id, _i);
+   
+            let osm_id: u64 = parts[1].parse()?;
+            let lat: f64 = parts[2].parse()?;
+            let lon: f64 = parts[3].parse()?;
+            let height: f64 = parts[4].parse()?;
+            let level: usize = if parts.len() > 5 {
+                parts[5].parse::<usize>().unwrap_or(usize::MAX)
+            } else {
+               usize::MAX
+            };
+            
+            graph.nodes.push(Node::new(osm_id, lat, lon, height, level));
         }
 
-        (self.nodes.clone(), edges, reverse_edges)
+        // Parse edges
+        for _ in 0..num_edges {
+            let line = lines.next().ok_or("Missing edge line")?;
+            let parts: Vec<&str> = line.split_whitespace().collect();
+    
+            if parts.len() < 5 {
+                return Err(format!("Malformed edge line {}, parts: {}", line, parts.len()).into());
+            }
+    
+            let source: usize = parts[0].parse()?;
+            let target: usize = parts[1].parse()?;
+            let weight: u64 = parts[2].parse()?;
+            let typ: u64 = parts[3].parse()?;
+            let max_speed: i64 = parts[4].parse()?;
+            let edge_id_a: Option<usize> = if parts.len() > 5 {
+                parts[5].parse().ok()
+            } else {
+                None
+            };
+            let edge_id_b: Option<usize> = if parts.len() > 6 {
+                parts[6].parse().ok()
+            } else {
+                None
+            };
+            
+            graph.edges.push(Edge::new(source, target, weight, typ, max_speed, edge_id_a, edge_id_b));
+        }
+
+       graph.build_offsets();
+
+        assert_eq!(num_nodes, graph.nodes.len());
+        assert_eq!(num_edges, graph.edges.len());
+        assert_eq!(num_edges, graph.reverse_edges.len());
+        assert_eq!(num_nodes + 1, graph.offsets.len());
+        assert_eq!(num_nodes + 1, graph.reverse_offsets.len());
+
+        Ok(graph)
+    }
+
+    pub fn add_edge(&mut self, edge: Edge) {
+        self.edges.push(edge.clone());
+        self.reverse_edges.push(edge);
+    }
+
+    pub fn build_offsets(&mut self) {
+        let num_nodes = self.nodes.len();
+
+        // Sort edges and create offset array
+        self.edges.sort_by_key(|edge| edge.from);
+
+        let mut current_offset = 0;
+        for node_id in 0..num_nodes {
+            self.offsets.push(current_offset);
+            while current_offset < self.edges.len() && self.edges[current_offset].from == node_id {
+                current_offset += 1;
+            }
+        }
+        self.offsets.push(current_offset);
+
+        // Same for reverse edges.
+        self.reverse_edges = self.edges.iter().cloned().collect();
+        self.reverse_edges.sort_by_key(|edge| edge.to);
+
+        let mut current_offset = 0;
+        for node_id in 0..num_nodes {
+            self.reverse_offsets.push(current_offset);
+            while current_offset < self.reverse_edges.len() && self.reverse_edges[current_offset].to == node_id {
+                current_offset += 1;
+            }
+        }
+        self.reverse_offsets.push(current_offset);
+    }
+
+    fn new(num_nodes: usize, num_edges: usize) -> Self {
+        OffsetArray { offsets: Vec::with_capacity(num_nodes + 1), reverse_offsets: Vec::with_capacity(num_nodes + 1), nodes: Vec::with_capacity(num_nodes), edges: Vec::with_capacity(num_edges), reverse_edges: Vec::with_capacity(num_edges) }
     }
 
     pub fn node_at(&self, idx: usize) -> &Node {
@@ -131,7 +224,7 @@ impl OffsetArray {
                     None => "-1".to_string()
                 };
 
-                writeln!(file, "{} {} {} {} {} {} {}", i, edge.to, edge.weight, edge.typ, edge.max_speed, edge_id_a, edge_id_b)?;
+                writeln!(file, "{} {} {} {} {} {} {}", edge.from, edge.to, edge.weight, edge.typ, edge.max_speed, edge_id_a, edge_id_b)?;
             }
         }
 
@@ -157,3 +250,27 @@ impl OffsetArray {
         (flat_edges, offsets)
     }
 }
+
+#[cfg(test)]
+mod test_offset_array {
+    use super::OffsetArray;
+
+    #[test]
+    fn test_offset_array_parse_toy() {
+        let graph = OffsetArray::from_file("inputs/toy.fmi").unwrap();
+        assert_eq!(graph.nodes.len(), 5);
+        assert_eq!(graph.edges.len(), 9);
+        assert_eq!(graph.offsets.len(), 6);
+        assert_eq!(graph.reverse_offsets.len(), 6);
+    }
+    
+    #[test]
+    fn test_offset_array_parse_mv() {
+        let graph = OffsetArray::from_file("inputs/MV.fmi").unwrap();
+        assert_eq!(graph.nodes.len(), 644199);
+        assert_eq!(graph.edges.len(), 1305996);
+        assert_eq!(graph.offsets.len(), 644200);
+        assert_eq!(graph.reverse_offsets.len(), 644200);
+    }
+}
+

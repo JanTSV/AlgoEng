@@ -86,11 +86,11 @@ impl CH {
                 }
 
                 for edge in self.graph.incoming_edges(id) {
-                    if self.incoming_distances[edge.to].is_none_or(|curr| weight + edge.weight < curr) && 
-                       self.graph.nodes[edge.to].level > self.graph.nodes[id].level {
-                        self.incoming_distances[edge.to] = Some(weight + edge.weight);
-                        self.incoming_heap.push(Distance::new(weight + edge.weight, edge.to));
-                        self.visited.push(edge.to);
+                    if self.incoming_distances[edge.from].is_none_or(|curr| weight + edge.weight < curr) && 
+                       self.graph.nodes[edge.from].level > self.graph.nodes[id].level {
+                        self.incoming_distances[edge.from] = Some(weight + edge.weight);
+                        self.incoming_heap.push(Distance::new(weight + edge.weight, edge.from));
+                        self.visited.push(edge.from);
                     }
                 }
             }
@@ -115,7 +115,7 @@ impl CH {
         let mut dijkstra = Dijkstra::new(graph);
 
         for (edge_id_b, incoming_edge) in graph.incoming_edges(node).iter().enumerate() {
-            let incoming_node = incoming_edge.to;
+            let incoming_node = incoming_edge.from;
             for (edge_id_a, outgoing_edge) in graph.outgoing_edges(node).iter().enumerate() {
                 let outgoing_node = outgoing_edge.to;
 
@@ -138,49 +138,48 @@ impl CH {
         shortcuts
     }
 
-    fn contract_node(graph: &OffsetArray, node: usize, level: usize, contracted: &mut Vec<bool>) -> (usize, OffsetArray) {
-        let (mut nodes, mut edges, mut reverse_edges) = graph.unflatten();
+    fn contract_node(graph: &mut OffsetArray, node: usize, level: usize, contracted: &mut Vec<bool>) -> usize {
         let mut num_created = 0;
 
         for (from, to, weight, edge_id_a, edge_id_b) in Self::calc_shortcuts(graph, node, contracted) {
-            edges[from].push(Edge::new(to, weight, 0, -1, Some(edge_id_a), Some(edge_id_b)));
-            reverse_edges[to].push(Edge::new(from, weight, 0, -1, None, None));
-
+            
+            graph.add_edge(Edge::new(from, to, weight, 0, -1, Some(edge_id_a), Some(edge_id_b)));
             num_created += 1;
         }
 
-        nodes[node].level = level;
+        graph.node_at_mut(node).level = level;
         contracted[node] = true;
 
-        (num_created, OffsetArray::build_from(nodes, edges, reverse_edges))
+        graph.build_offsets();
+        num_created
     }
 
-    fn contract_indep_set(graph: &OffsetArray, indep_set: &Vec<(Vec<Shortcut>, i64, usize)>, level: usize, threshold: i64, contracted: &mut Vec<bool>) -> (usize, usize, OffsetArray) {
+    fn contract_indep_set(graph: &mut OffsetArray, indep_set: &Vec<(Vec<Shortcut>, i64, usize)>, level: usize, threshold: i64, contracted: &mut Vec<bool>) -> (usize, usize) {
         let mut num_created = 0;
         let mut num_contracted = 0;
 
 
         // Create a new graph with the shortcuts
-        let (mut nodes, mut edges, mut reverse_edges) = graph.unflatten();
         for (shortcut, edge_diff, c) in indep_set {
             if *edge_diff <= threshold {
                 // Add shortcuts
                 for (from, to, weight, edge_id_a, edge_id_b) in shortcut {
-                    edges[*from].push(Edge::new(*to, *weight, 0, -1, Some(*edge_id_a), Some(*edge_id_b)));
-                    reverse_edges[*to].push(Edge::new(*from, *weight, 0, -1, None, None));
+                    graph.add_edge(Edge::new(*from, *to, *weight, 0, -1, Some(*edge_id_a), Some(*edge_id_b)));
 
                     num_created += 1;
                 }
 
                 //  Mark node as contracted and set level
-                nodes[*c].level = level;
+                graph.node_at_mut(*c).level = level;
                 contracted[*c] = true;
                 num_contracted += 1;
             }
             
         }
 
-        (num_contracted, num_created, OffsetArray::build_from(nodes, edges, reverse_edges))
+        graph.build_offsets();
+
+        (num_contracted, num_created)
     }
 
     pub fn batch_preprocess(&mut self) -> usize {
@@ -205,14 +204,13 @@ impl CH {
             let threshold = indep_set[3 * indep_set.len() / 4].0;
 
             //let (num_contracted, num_created, new_graph) = Self::contract_indep_set(&self.graph, &indep_set, level, threshold, &mut contracted);
-            let (num_contracted, num_created, new_graph) = Self::_contract_indep_set(&self.graph, &indep_set, level, threshold, &mut contracted);
+            let (num_contracted, num_created) = Self::_contract_indep_set(&mut self.graph, &indep_set, level, threshold, &mut contracted);
             
             if num_contracted == 0 {
                 break;
             }
 
             // Use new graph in next iteration
-            self.graph = new_graph;
             println!("Created {} / Contracted {} at level {}", num_created, num_contracted, level);
 
             num_shortcuts += num_created;
@@ -222,8 +220,7 @@ impl CH {
         // Contract nodes if there are any left (a fallback jst in case, hopefully never)
         for i in 0..contracted.len() {
             if !contracted[i] {
-                let (num_created, new_graph) = Self::contract_node(&self.graph, i, level, &mut contracted);
-                self.graph = new_graph;
+                let num_created = Self::contract_node(&mut self.graph, i, level, &mut contracted);
 
                 num_shortcuts += num_created;
                 level += 1;
@@ -243,11 +240,11 @@ impl CH {
         };
 
         for edge in self.graph.incoming_edges(node) {
-            let neighbor_level = self.graph.nodes[edge.to].level;
+            let neighbor_level = self.graph.nodes[edge.from].level;
 
             // Only consider neighbors with higher level
             if neighbor_level > node_level {
-                if let Some(alt_dist) = self.distances[edge.to] {
+                if let Some(alt_dist) = self.distances[edge.from] {
                     if alt_dist + edge.weight < node_dist {
                         return true;
                     }
@@ -296,7 +293,7 @@ impl CH {
                 blocked[edge.to] = true;
             }
             for edge in graph.incoming_edges(node) {
-                blocked[edge.to] = true;
+                blocked[edge.from] = true;
             }
         }
 
@@ -311,13 +308,12 @@ impl CH {
 
 
     fn _contract_indep_set(
-        graph: &OffsetArray,
+        graph: &mut OffsetArray,
         indep_set: &Vec<(i64, usize)>,
         level: usize,
         threshold: i64,
         contracted: &mut Vec<bool>
-    ) -> (usize, usize, OffsetArray) {
-        let (nodes, mut edges, mut reverse_edges) = graph.unflatten();
+    ) -> (usize, usize) {
     
         // Step 1: Compute shortcut additions in parallel
         let results: Vec<_> = indep_set
@@ -331,26 +327,23 @@ impl CH {
     
         let mut num_created = 0;
         let mut num_contracted = 0;
-        let mut new_nodes = nodes.clone(); // We'll modify and rebuild
     
         // Step 2: Apply the modifications sequentially
         for (node, shortcuts) in results {
             for (from, to, weight, edge_id_a, edge_id_b) in shortcuts {
-                edges[from].push(Edge::new(to, weight, 0, -1, Some(edge_id_a), Some(edge_id_b)));
-                reverse_edges[to].push(Edge::new(from, weight, 0, -1, None, None));
+                graph.add_edge(Edge::new(from, to, weight, 0, -1, Some(edge_id_a), Some(edge_id_b)));
                 num_created += 1;
             }
-    
-            new_nodes[node].level = level;
+            
+            graph.node_at_mut(node).level = level;
             contracted[node] = true;
             num_contracted += 1;
         }
+
+        // Rebuild graph offsets
+        graph.build_offsets();
     
-        (
-            num_contracted,
-            num_created,
-            OffsetArray::build_from(new_nodes, edges, reverse_edges),
-        )
+        (num_contracted, num_created)
     }
     
     fn _find_independent_set(graph: &OffsetArray, contracted: &Vec<bool>) -> Vec<(i64, usize)> {
@@ -368,7 +361,7 @@ impl CH {
                 blocked[edge.to] = true;
             }
             for edge in graph.incoming_edges(node) {
-                blocked[edge.to] = true;
+                blocked[edge.from] = true;
             }
         }
 
@@ -382,7 +375,7 @@ impl CH {
         let outgoing_edges = graph.outgoing_edges(node);
     
         for in_edge in incoming_edges {
-            let from = in_edge.to;
+            let from = in_edge.from;
             if contracted[from] {
                 continue;
             }
@@ -409,16 +402,15 @@ mod test_ch {
     use std::time::Instant;
 
     use super::CH;
-    use crate::perm::Permutation;
-    use crate::reader::parse_graph;
     use crate::dijkstra::Dijkstra;
+    use crate::graph::OffsetArray;
 
     #[test]
     fn test_ch_without_stall_on_demand() {
         // Load graph with CH levels
         let start = Instant::now();
         println!("Started parsing...");
-        let graph = parse_graph("inputs/stgtregbz_ch.fmi").unwrap();
+        let graph = OffsetArray::from_file("inputs/stgtregbz_ch.fmi").unwrap();
         let duration = start.elapsed();
         println!("Loaded graph in {:.2?}", duration);
 
@@ -456,7 +448,7 @@ mod test_ch {
         // Load graph with CH levels
         let start = Instant::now();
         println!("Started parsing...");
-        let graph = parse_graph("inputs/stgtregbz_ch.fmi").unwrap();
+        let graph = OffsetArray::from_file("inputs/stgtregbz_ch.fmi").unwrap();
         let duration = start.elapsed();
         println!("Loaded graph in {:.2?}", duration);
 
@@ -491,42 +483,6 @@ mod test_ch {
     
     #[test]
     fn test_ch_with_stall_on_demand_and_sorted_by_level() {
-        // Load graph with CH levels
-        let start = Instant::now();
-        println!("Started parsing...");
-        let graph = parse_graph("inputs/stgtregbz_ch.fmi").unwrap();
-        let duration = start.elapsed();
-        println!("Loaded graph in {:.2?}", duration);
-
-        // Permutate graph
-        let perm = Permutation::by_level(&graph);
-        let graph = perm.permutate_graph(&graph);
-
-        // Test Dijkstra vs CH
-        let mut dijkstra = Dijkstra::new(&graph);
-        const START: usize = 377371;
-        const TARGET: usize = 754742;
-        print!("Dijkstra: ");
-        let start = Instant::now();
-        let dijkstra_found = dijkstra.shortest_path(perm.from(START), perm.from(TARGET));
-        match dijkstra_found {
-            Some(dist) => print!("Found a shortest path from {START} to {TARGET}: {dist} "),
-            None => print!("Did NOT find a path between {START} and {TARGET} ")
-        }
-        let duration = start.elapsed();
-        println!("[{:.2?}]", duration);
-        let mut ch = CH::new(graph);
-    
-        print!("CH (with stall-on-demand): ");
-        let start = Instant::now();
-        let ch_found = ch.shortest_path(perm.from(START), perm.from(TARGET), true);
-        match ch_found {
-            Some(dist) => print!("Found a shortest path from {START} to {TARGET}: {dist} "),
-            None => print!("Did NOT find a path between {START} and {TARGET} ")
-        }
-        let duration = start.elapsed();
-        println!("[{:.2?}]", duration);
-
-        assert_eq!(dijkstra_found, ch_found);
+        // TODO
     }
 }

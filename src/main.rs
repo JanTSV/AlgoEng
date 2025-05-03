@@ -1,18 +1,17 @@
 use std::time::Instant;
 
-use crate::{reader::parse_graph, dijkstra::Dijkstra, ch::CH, perm::Permutation};
+use crate::{ch::CH, graph::OffsetArray};
 
 mod graph;
 mod reader;
 mod dijkstra;
 mod ch;
-mod perm;
 
 fn main() {
     // Load graph
     let start = Instant::now();
     println!("Started parsing...");
-    let graph = parse_graph("inputs/MV.fmi").unwrap();
+    let graph = OffsetArray::from_file("inputs/MV.fmi").unwrap();
     let duration = start.elapsed();
     println!("Loaded graph in {:.2?}", duration);
 

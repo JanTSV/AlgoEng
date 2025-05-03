@@ -113,14 +113,14 @@ impl<'a> Dijkstra<'a> {
 mod test_dijkstra {
     use std::time::Instant;
 
-    use crate::reader::{parse_graph, parse_queries};
+    use crate::{reader::parse_queries, graph::OffsetArray};
 
     use super::Dijkstra;
 
     #[test]
     fn test_dijkstra_in_mv() {
         let queries = parse_queries("inputs/queries.txt").unwrap();
-        let graph = parse_graph("inputs/MV.fmi").unwrap();
+        let graph = OffsetArray::from_file("inputs/MV.fmi").unwrap();
         let mut dijkstra = Dijkstra::new(&graph);
 
         let expected = [Some(210922),

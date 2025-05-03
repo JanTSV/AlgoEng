@@ -277,6 +277,7 @@ mod test_ch {
     use super::CH;
     use crate::dijkstra::Dijkstra;
     use crate::graph::OffsetArray;
+    use crate::reader::parse_queries;
 
     #[test]
     fn test_ch_without_stall_on_demand() {
@@ -355,7 +356,65 @@ mod test_ch {
 
     
     #[test]
-    fn test_ch_with_stall_on_demand_and_sorted_by_level() {
-        // TODO
+    fn test_ch_own_preprocessing() {
+        // Load graph
+        let queries = parse_queries("inputs/queries.txt").unwrap();
+        let graph = OffsetArray::from_file("inputs/MV.fmi").unwrap();
+        let mut ch = CH::new(graph);
+
+        // Preprocess
+        let start = Instant::now();
+        println!("Started CH preprocessing...");
+        ch.batch_preprocess();
+        let duration = start.elapsed();
+        println!("Preprocessed in {:.2?}", duration);
+    
+        let expected = [Some(210922),
+            Some(211124),
+            Some(212697),
+            Some(211381),
+            Some(210818),
+            Some(213098),
+            Some(210569),
+            Some(211076),
+            Some(212353),
+            Some(210427),
+            Some(212241),
+            Some(212443),
+            Some(214016),
+            Some(212700),
+            Some(212137),
+            Some(214417),
+            Some(211888),
+            Some(212395),
+            Some(213672),
+            Some(211746),
+            Some(214577),
+            Some(214779),
+            Some(216352),
+            Some(215036),
+            Some(214473),
+            Some(216753),
+            Some(214224),
+            Some(214731),
+            Some(216008),
+            Some(214082),
+            Some(215758),
+            Some(215960),
+            Some(217533),
+            Some(216217),
+            Some(215654),
+            Some(217934),
+            Some(215405),
+            Some(215912),
+            Some(217189),
+            Some(215263)];
+
+        for (i, (s, t)) in queries.iter().enumerate() {
+            let start = Instant::now();
+            assert_eq!(expected[i], ch.shortest_path(*s, *t, true));
+            let duration = start.elapsed();
+            println!("query took [{:.2?}]", duration);
+        }
     }
 }

@@ -11,7 +11,7 @@ fn main() {
     // Load graph
     let start = Instant::now();
     println!("Started parsing...");
-    let graph = Graph::from_file("inputs/germany.fmi").unwrap();
+    let graph = Graph::from_file("inputs/MV.fmi").unwrap();
     let duration = start.elapsed();
     println!("Loaded graph in {:.2?}", duration);
 

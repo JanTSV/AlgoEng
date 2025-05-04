@@ -3,7 +3,7 @@ use std::process::exit;
 
 use rayon::prelude::*;
 
-use crate::graph::{Graph, Edge};
+use crate::graph::{Graph};
 use crate::dijkstra::{Distance, Dijkstra};
 
 type Shortcut = (usize, usize, u64, usize, usize);
@@ -139,7 +139,8 @@ impl CH {
         &mut self,
         indep_set: &Vec<(isize, usize)>,
         level: usize,
-        contracted: &mut [u64]
+        contracted: &mut [u64],
+        nodes: &mut Vec<usize>
     ) -> (usize, usize) {
     
         // Compute shortcuts for part of independent set with low edge diff
@@ -152,7 +153,7 @@ impl CH {
                 (node, shortcuts)
             })
             .collect();
-    
+        
         let mut num_created = 0;
         let num_contracted = results.len();
     
@@ -166,6 +167,13 @@ impl CH {
             self.graph.node_at_mut(node).level = level;
             contracted[node / 64] |= 1 << (node % 64);
         }
+
+        for i in n..indep_set.len() {
+            let node = indep_set[i].1;
+            assert!((contracted[node / 64]) & (1 << (node % 64)) == 0);
+            nodes.push(node);
+        }
+    
     
         (num_contracted, num_created)
     }
@@ -173,27 +181,30 @@ impl CH {
     pub fn batch_preprocess(&mut self) -> usize {
         let mut level = 0;
         let mut contracted = vec![0u64; self.graph.num_nodes().div_ceil(64)];
-        let mut num_shortcuts = 0;
+        let mut all_num_shortcuts = 0;
+        let mut all_num_contracted = 0;
+        let mut nodes: Vec<usize> = (0..self.graph.num_nodes()).collect();
     
         loop {
             // Find independent set
-            let indep_set = self.find_independent_set(&contracted);
+            let indep_set = self.find_independent_set(&mut nodes);
             if indep_set.is_empty() {
                 break;
             }
 
             // Contract part of independent set with low edge diff
-            let (num_contracted, num_created) = self.contract_indep_set(&indep_set, level, &mut contracted);
-            num_shortcuts += num_created;
+            let (num_contracted, num_created) = self.contract_indep_set(&indep_set, level, &mut contracted, &mut nodes);
+            all_num_shortcuts += num_created;
+            all_num_contracted += num_contracted;
             
-            println!("Created {} / Contracted {} at level {}", num_shortcuts, num_contracted, level);
+            println!("Created {} / Contracted {} at level {}", all_num_shortcuts, all_num_contracted, level);
 
             // Increase level for next independent set
             level += 1;
         }
 
-        println!("#created: {}, #edges in new graph: {}", num_shortcuts, self.graph.num_edges());
-        num_shortcuts
+        println!("#created: {}, #edges in new graph: {}", all_num_shortcuts, self.graph.num_edges());
+        all_num_shortcuts
     }
 
     fn should_stall_forward(&self, node: usize) -> bool {
@@ -239,12 +250,14 @@ impl CH {
         false
     }
     
-    fn find_independent_set(&self, contracted: &[u64]) -> Vec<(isize, usize)> {
+    fn find_independent_set(&self, nodes: &mut Vec<usize>) -> Vec<(isize, usize)> {
         let mut independent_set: Vec<(isize, usize)> = Vec::new();
         let mut blocked = vec![0u64; self.graph.num_nodes().div_ceil(64)];
+        let mut blocked_nodes = Vec::new();
     
-        for node in 0..self.graph.num_nodes() {
-            if (blocked[node / 64] | contracted[node / 64]) & (1 << (node % 64)) != 0 {
+        for node in nodes.iter().map(|node| *node) {
+            if blocked[node / 64] & (1 << (node % 64)) != 0 {
+                blocked_nodes.push(node);
                 continue;
             }
 
@@ -258,6 +271,8 @@ impl CH {
                 blocked[to / 64] |= 1 << (to % 64);
             }
         }
+
+        *nodes = blocked_nodes;
 
         // Sort independent set
         independent_set.sort_by_key(|x| x.0);

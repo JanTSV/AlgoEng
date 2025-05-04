@@ -105,10 +105,9 @@ impl CH {
         distance
     }
 
-    fn calc_shortcuts(&self, node: usize, contracted: &[u64]) -> Vec<Shortcut> {
+    fn calc_shortcuts(&self, dijkstra: &mut Dijkstra, node: usize, contracted: &[u64]) -> Vec<Shortcut> {
         // (from, to, weight, edge_id_a, edge_id_b)
         let mut shortcuts: Vec<Shortcut> = Vec::new();
-        let mut dijkstra = Dijkstra::new(&self.graph);
 
         for (edge_id_b, incoming_edge) in self.graph.incoming_edges(node).enumerate() {
             let incoming_node = incoming_edge.0;
@@ -151,8 +150,9 @@ impl CH {
         let results: Vec<(usize, Vec<Shortcut>)> = sub_indep_set
             .par_chunks(chunk_size)
             .flat_map(|chunk| {
+                let mut dijkstra = Dijkstra::new(&self.graph);
                 chunk.iter().map(|&(_, node)| {
-                    let shortcuts = self.calc_shortcuts(node, contracted);
+                    let shortcuts = self.calc_shortcuts(&mut dijkstra, node, contracted);
                     (node, shortcuts)
                 }).collect::<Vec<_>>() // collect per chunk to allow flat_map
             })
@@ -200,7 +200,7 @@ impl CH {
             all_num_shortcuts += num_created;
             all_num_contracted += num_contracted;
             
-            // println!("Created {} / Contracted {} at level {}", all_num_shortcuts, all_num_contracted, level);
+            println!("Created {} / Contracted {} at level {}", all_num_shortcuts, all_num_contracted, level);
 
             // Increase level for next independent set
             level += 1;

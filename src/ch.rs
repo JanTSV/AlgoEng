@@ -23,7 +23,7 @@ pub struct CH {
 
 impl CH {
     pub fn new(graph: Graph) -> Self {
-        let n = graph.nodes_num();
+        let n = graph.num_nodes();
         CH { graph, 
              distances: vec![None; n], 
              heap: BinaryHeap::new(), 
@@ -65,11 +65,11 @@ impl CH {
                 }
 
                 for edge in self.graph.outgoing_edges(id) {
-                    if self.distances[edge.to].is_none_or(|curr| weight + edge.weight < curr) && 
-                       self.graph.node_at(edge.to).level > self.graph.node_at(id).level {
-                        self.distances[edge.to] = Some(weight + edge.weight);
-                        self.heap.push(Distance::new(weight + edge.weight, edge.to));
-                        self.visited.push(edge.to);
+                    if self.distances[edge.0].is_none_or(|curr| weight + edge.1 < curr) && 
+                       self.graph.node_at(edge.0).level > self.graph.node_at(id).level {
+                        self.distances[edge.0] = Some(weight + edge.1);
+                        self.heap.push(Distance::new(weight + edge.1, edge.0));
+                        self.visited.push(edge.0);
                     }
                 }
             }
@@ -82,11 +82,11 @@ impl CH {
                 }
 
                 for edge in self.graph.incoming_edges(id) {
-                    if self.incoming_distances[edge.to].is_none_or(|curr: u64| weight + edge.weight < curr) && 
-                       self.graph.node_at(edge.to).level > self.graph.node_at(id).level {
-                        self.incoming_distances[edge.to] = Some(weight + edge.weight);
-                        self.incoming_heap.push(Distance::new(weight + edge.weight, edge.to));
-                        self.visited.push(edge.to);
+                    if self.incoming_distances[edge.0].is_none_or(|curr: u64| weight + edge.1 < curr) && 
+                       self.graph.node_at(edge.0).level > self.graph.node_at(id).level {
+                        self.incoming_distances[edge.0] = Some(weight + edge.1);
+                        self.incoming_heap.push(Distance::new(weight + edge.1, edge.0));
+                        self.visited.push(edge.0);
                     }
                 }
             }
@@ -111,9 +111,9 @@ impl CH {
         let mut dijkstra = Dijkstra::new(&self.graph);
 
         for (edge_id_b, incoming_edge) in self.graph.incoming_edges(node).enumerate() {
-            let incoming_node = incoming_edge.to;
+            let incoming_node = incoming_edge.0;
             for (edge_id_a, outgoing_edge) in self.graph.outgoing_edges(node).enumerate() {
-                let outgoing_node = outgoing_edge.to;
+                let outgoing_node = outgoing_edge.0;
 
                 if ((contracted[incoming_node / 64]) & (1 << (incoming_node % 64)) != 0) || 
                    ((contracted[outgoing_node / 64]) & (1 << (outgoing_node % 64)) != 0) {
@@ -121,7 +121,7 @@ impl CH {
                 }
 
                 if let Some(shortest_path) = dijkstra.shortest_path_consider_contraction(incoming_node,outgoing_node, contracted) {
-                    let direct_distance = incoming_edge.weight + outgoing_edge.weight;
+                    let direct_distance = incoming_edge.1 + outgoing_edge.1;
                     if shortest_path >= direct_distance {
                         shortcuts.push((incoming_node, outgoing_node, direct_distance, edge_id_a, edge_id_b));
                     }
@@ -137,7 +137,7 @@ impl CH {
 
     fn contract_indep_set(
         &mut self,
-        indep_set: &Vec<(i64, usize)>,
+        indep_set: &Vec<(isize, usize)>,
         level: usize,
         contracted: &mut [u64]
     ) -> (usize, usize) {
@@ -158,24 +158,21 @@ impl CH {
     
         // Add shortcuts
         for (node, shortcuts) in results {
-            for (from, to, weight, edge_id_a, edge_id_b) in shortcuts {
-                self.graph.add_edge(Edge::new(from, to, weight, 0, -1, Some(edge_id_a), Some(edge_id_b)));
+            for (from, to, weight, _edge_id_a, _edge_id_b) in shortcuts {
+                self.graph.add_edge(from, to, weight);
                 num_created += 1;
             }
             
             self.graph.node_at_mut(node).level = level;
             contracted[node / 64] |= 1 << (node % 64);
         }
-
-        // Rebuild graph offsets
-        self.graph.build_offsets();
     
         (num_contracted, num_created)
     }
 
     pub fn batch_preprocess(&mut self) -> usize {
         let mut level = 0;
-        let mut contracted = vec![0u64; self.graph.nodes_num().div_ceil(64)];
+        let mut contracted = vec![0u64; self.graph.num_nodes().div_ceil(64)];
         let mut num_shortcuts = 0;
     
         loop {
@@ -207,12 +204,12 @@ impl CH {
         };
 
         for edge in self.graph.incoming_edges(node) {
-            let neighbor_level = self.graph.node_at(edge.to).level;
+            let neighbor_level = self.graph.node_at(edge.0).level;
 
             // Only consider neighbors with higher level
             if neighbor_level > node_level {
-                if let Some(alt_dist) = self.distances[edge.to] {
-                    if alt_dist + edge.weight < node_dist {
+                if let Some(alt_dist) = self.distances[edge.0] {
+                    if alt_dist + edge.1 < node_dist {
                         return true;
                     }
                 }
@@ -229,11 +226,11 @@ impl CH {
         };
 
         for edge in self.graph.outgoing_edges(node) {
-            let neighbor_level = self.graph.node_at(edge.to).level;
+            let neighbor_level = self.graph.node_at(edge.0).level;
 
             if neighbor_level > node_level {
-                if let Some(alt_dist) = self.incoming_distances[edge.to] {
-                    if alt_dist + edge.weight < node_dist {
+                if let Some(alt_dist) = self.incoming_distances[edge.0] {
+                    if alt_dist + edge.1 < node_dist {
                         return true;
                     }
                 }
@@ -242,25 +239,23 @@ impl CH {
         false
     }
     
-    fn find_independent_set(&self, contracted: &[u64]) -> Vec<(i64, usize)> {
-        let mut independent_set: Vec<(i64, usize)> = Vec::new();
-        let mut blocked = vec![0u64; self.graph.nodes_num().div_ceil(64)];
+    fn find_independent_set(&self, contracted: &[u64]) -> Vec<(isize, usize)> {
+        let mut independent_set: Vec<(isize, usize)> = Vec::new();
+        let mut blocked = vec![0u64; self.graph.num_nodes().div_ceil(64)];
     
-        for node in 0..self.graph.nodes_num() {
+        for node in 0..self.graph.num_nodes() {
             if (blocked[node / 64] | contracted[node / 64]) & (1 << (node % 64)) != 0 {
                 continue;
             }
 
-            let incoming_num = self.graph.incoming_edges(node).count() as i64; 
-            let outgoing_num = self.graph.outgoing_edges(node).count() as i64; 
+            let incoming_num = self.graph.incoming_edges(node).count() as isize; 
+            let outgoing_num = self.graph.outgoing_edges(node).count() as isize; 
 
             independent_set.push((incoming_num * outgoing_num - incoming_num - outgoing_num, node));
+            
             // Block its neighbors from being selected
-            for edge in self.graph.outgoing_edges(node) {
-                blocked[edge.to / 64] |= 1 << (edge.to % 64);
-            }
-            for edge in self.graph.incoming_edges(node) {
-                blocked[edge.to / 64] |= 1 << (edge.to % 64);
+            for (to, _) in self.graph.edges(node) {
+                blocked[to / 64] |= 1 << (to % 64);
             }
         }
 

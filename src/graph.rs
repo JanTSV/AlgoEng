@@ -1,3 +1,4 @@
+use std::ops::Index;
 use std::{fs::OpenOptions, error::Error};
 use std::io::Write;
 use std::io::{BufRead, BufReader};
@@ -22,31 +23,20 @@ impl Edge {
 
 #[derive(Debug, Clone)]
 pub struct Node {
-    pub osm_id: u64,
-    pub lat: f64,
-    pub lon: f64,
-    pub height: f64,
     pub level: usize
 }
 
 impl Node {
-    pub fn new(osm_id: u64, lat: f64, lon: f64, height: f64, level: usize) -> Self {
-        Node { osm_id, lat, lon, height, level }
+    pub fn new(level: usize) -> Self {
+        Node { level }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Graph {
-    // Offsets
-    offsets: Vec<usize>,
-    reverse_offsets: Vec<usize>,
-    
     // Nodes
     nodes: Vec<Node>,
-
-    // Edges
-    edges: Vec<Edge>,
-    reverse_edges: Vec<Edge>
+    edges: Vec<Vec<(usize, u64, bool)>>,
 }
 
 impl Graph {
@@ -87,17 +77,17 @@ impl Graph {
             let id: usize = parts[0].parse()?;
             assert_eq!(id, _i);
    
-            let osm_id: u64 = parts[1].parse()?;
-            let lat: f64 = parts[2].parse()?;
-            let lon: f64 = parts[3].parse()?;
-            let height: f64 = parts[4].parse()?;
+            let _osm_id: u64 = parts[1].parse()?;
+            let _lat: f64 = parts[2].parse()?;
+            let _lon: f64 = parts[3].parse()?;
+            let _height: f64 = parts[4].parse()?;
             let level: usize = if parts.len() > 5 {
                 parts[5].parse::<usize>().unwrap_or(usize::MAX)
             } else {
                usize::MAX
             };
             
-            graph.nodes.push(Node::new(osm_id, lat, lon, height, level));
+            graph.nodes.push(Node::new(level));
         }
 
         // Parse edges
@@ -126,78 +116,35 @@ impl Graph {
                 None
             };
             
-            graph.edges.push(Edge::new(source, target, weight, typ, max_speed, edge_id_a, edge_id_b));
+            graph.edges[source].push((target, weight, true));
+            graph.edges[target].push((source, weight, false));
         }
 
-        // Clone reverse edges with to and from swapped        
-        graph.reverse_edges = graph.edges
-            .iter()
-            .map(|e| Edge::new(
-                e.to,
-                e.from,
-                e.weight,
-                e.typ,
-                e.max_speed,
-                e.edge_id_a,
-                e.edge_id_b,
-            ))
-            .collect();
-
-       graph.build_offsets();
-
         assert_eq!(num_nodes, graph.nodes.len());
-        assert_eq!(num_edges, graph.edges.len());
-        assert_eq!(num_edges, graph.reverse_edges.len());
-        assert_eq!(num_nodes + 1, graph.offsets.len());
-        assert_eq!(num_nodes + 1, graph.reverse_offsets.len());
+        assert_eq!(num_nodes, graph.edges.len());
+        assert_eq!(num_edges, graph.num_edges());
 
         Ok(graph)
     }
 
-    pub fn nodes_num(&self) -> usize {
+    pub fn num_edges(&self) -> usize {
+        self.edges
+            .iter()
+            .map(|edge| edge.iter().filter(|(_, _, forward)| *forward).count())
+            .sum()
+    }
+
+    pub fn num_nodes(&self) -> usize {
         self.nodes.len()
     } 
 
-    pub fn add_edge(&mut self, edge: Edge) {
-        let rev_edge = Edge::new(edge.to, edge.from, edge.weight, edge.typ, edge.max_speed, edge.edge_id_a, edge.edge_id_b); 
-        self.edges.push(edge);
-        self.reverse_edges.push(rev_edge);
-    }
-
-    pub fn build_offsets(&mut self) {
-        let num_nodes = self.nodes_num();
-
-        // Clear old offsets
-        self.offsets.clear();
-        self.reverse_offsets.clear();
-
-        // Sort edges and create offset array
-        self.edges.sort_by_key(|edge| edge.from);
-
-        let mut current_offset = 0;
-        for node_id in 0..num_nodes {
-            self.offsets.push(current_offset);
-            while current_offset < self.edges.len() && self.edges[current_offset].from == node_id {
-                current_offset += 1;
-            }
-        }
-        self.offsets.push(current_offset);
-
-        // Same for reverse edges.
-        self.reverse_edges.sort_by_key(|edge| edge.from);
-
-        let mut current_offset = 0;
-        for node_id in 0..num_nodes {
-            self.reverse_offsets.push(current_offset);
-            while current_offset < self.reverse_edges.len() && self.reverse_edges[current_offset].from == node_id {
-                current_offset += 1;
-            }
-        }
-        self.reverse_offsets.push(current_offset);
+    pub fn add_edge(&mut self, from: usize, to: usize, weight: u64) {
+        self.edges[from].push((to, weight, true));
+        self.edges[to].push((from, weight, false));
     }
 
     fn new(num_nodes: usize, num_edges: usize) -> Self {
-        Graph { offsets: Vec::with_capacity(num_nodes + 1), reverse_offsets: Vec::with_capacity(num_nodes + 1), nodes: Vec::with_capacity(num_nodes), edges: Vec::with_capacity(num_edges), reverse_edges: Vec::with_capacity(num_edges) }
+        Graph { nodes: Vec::with_capacity(num_nodes), edges: vec![Vec::new(); num_nodes] }
     }
 
     pub fn node_at(&self, idx: usize) -> &Node {
@@ -208,16 +155,22 @@ impl Graph {
         &mut self.nodes[idx]
     }
 
-    pub fn outgoing_edges(&self, idx: usize) -> impl Iterator<Item = &Edge> {
-         self.edges[self.offsets[idx]..self.offsets[idx + 1]].iter()
+    pub fn outgoing_edges(&self, idx: usize) -> impl Iterator<Item = (usize, u64)> + '_  {
+        self.edges[idx]
+            .iter()
+            .filter_map(|(to, weight, dir)| dir.then_some((*to, *weight)))
     }
 
-    pub fn incoming_edges(&self, idx: usize) -> impl Iterator<Item = &Edge> {
-         self.reverse_edges[self.reverse_offsets[idx]..self.reverse_offsets[idx + 1]].iter()
+    pub fn incoming_edges(&self, idx: usize) -> impl Iterator<Item = (usize, u64)> + '_  {
+        self.edges[idx]
+            .iter()
+            .filter_map(|(to, weight, dir)| (!dir).then_some((*to, *weight)))
     }
 
-    pub fn num_edges(&self) -> usize {
-        *self.offsets.last().unwrap()
+    pub fn edges(&self, idx: usize) -> impl Iterator<Item = (usize, u64)> + '_ {
+        self.edges[idx]
+            .iter()
+            .map(|(to, weight, _)| (*to, *weight))
     }
 
     pub fn to_file(&self, filename: &str) -> Result<(), Box<dyn Error>> {
@@ -243,24 +196,10 @@ impl Graph {
 
         // Print nodes: <ID> <OSMID> <Lat> <Lon> <Height> <Level>
         for (id, node) in self.nodes.iter().enumerate() {
-            writeln!(file, "{} {} {} {} {} {}", id, node.osm_id, node.lat, node.lon, node.height, node.level)?;
+            // TODO: writeln!(file, "{} {} {} {} {} {}", id, node.osm_id, node.lat, node.lon, node.height, node.level)?;
         }
 
-        // Print edges: <SrcID> <TrgID> <Weight> <Type> <MaxSpeed> <EdgeIdA> <EdgeIdB>
-        for i in 0..self.offsets.len() - 1 {
-            for edge in self.outgoing_edges(i) {
-                let edge_id_a: String = match edge.edge_id_a {
-                    Some(x) => x.to_string(),
-                    None => "-1".to_string()
-                };
-                let edge_id_b: String = match edge.edge_id_b {
-                    Some(x) => x.to_string(),
-                    None => "-1".to_string()
-                };
-
-                writeln!(file, "{} {} {} {} {} {} {}", edge.from, edge.to, edge.weight, edge.typ, edge.max_speed, edge_id_a, edge_id_b)?;
-            }
-        }
+        // TODO: Print edges: <SrcID> <TrgID> <Weight> <Type> <MaxSpeed> <EdgeIdA> <EdgeIdB>
 
         // End empty line
         writeln!(file, "")?;
@@ -277,9 +216,7 @@ mod test_offset_array {
     fn test_offset_array_parse_toy() {
         let graph = Graph::from_file("inputs/toy.fmi").unwrap();
         assert_eq!(graph.nodes.len(), 5);
-        assert_eq!(graph.edges.len(), 9);
-        assert_eq!(graph.offsets.len(), 6);
-        assert_eq!(graph.reverse_offsets.len(), 6);
+        assert_eq!(graph.num_edges(), 9);
 
         println!("{:?}", graph);
     }
@@ -288,9 +225,7 @@ mod test_offset_array {
     fn test_offset_array_parse_mv() {
         let graph = Graph::from_file("inputs/MV.fmi").unwrap();
         assert_eq!(graph.nodes.len(), 644199);
-        assert_eq!(graph.edges.len(), 1305996);
-        assert_eq!(graph.offsets.len(), 644200);
-        assert_eq!(graph.reverse_offsets.len(), 644200);
+        assert_eq!(graph.num_edges(), 1305996);
     }
 }
 

@@ -38,7 +38,7 @@ pub struct Dijkstra<'a> {
 
 impl<'a> Dijkstra<'a> {
     pub fn new(graph: &'a Graph) -> Self {
-        Dijkstra { graph, weights: vec![None; graph.nodes_num()], heap: BinaryHeap::new(), visited: Vec::new() }
+        Dijkstra { graph, weights: vec![None; graph.num_nodes()], heap: BinaryHeap::new(), visited: Vec::new() }
     }
 
     pub fn shortest_path_consider_contraction(&mut self, s: usize, t: usize, contracted: &[u64]) -> Option<u64> {
@@ -59,14 +59,14 @@ impl<'a> Dijkstra<'a> {
             }
 
             for edge in self.graph.outgoing_edges(id) {
-                if contracted[edge.to / 64] & (1 << (edge.to % 64)) != 0 {
+                if contracted[edge.0 / 64] & (1 << (edge.0 % 64)) != 0 {
                     continue;
                 }
 
-                if self.weights[edge.to].is_none_or(|curr| weight + edge.weight < curr) {
-                    self.weights[edge.to] = Some(weight + edge.weight);
-                    self.heap.push(Distance::new(weight + edge.weight, edge.to));
-                    self.visited.push(edge.to);
+                if self.weights[edge.0].is_none_or(|curr| weight + edge.1 < curr) {
+                    self.weights[edge.0] = Some(weight + edge.1);
+                    self.heap.push(Distance::new(weight + edge.1, edge.0));
+                    self.visited.push(edge.0);
                 }
             }
         }
@@ -92,10 +92,10 @@ impl<'a> Dijkstra<'a> {
             }
 
             for edge in self.graph.outgoing_edges(id) {
-                if self.weights[edge.to].is_none_or(|curr| weight + edge.weight < curr) {
-                    self.weights[edge.to] = Some(weight + edge.weight);
-                    self.heap.push(Distance::new(weight + edge.weight, edge.to));
-                    self.visited.push(edge.to);
+                if self.weights[edge.0].is_none_or(|curr| weight + edge.1 < curr) {
+                    self.weights[edge.0] = Some(weight + edge.1);
+                    self.heap.push(Distance::new(weight + edge.1, edge.0));
+                    self.visited.push(edge.0);
                 }
             }
         }

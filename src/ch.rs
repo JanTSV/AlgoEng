@@ -197,7 +197,7 @@ impl CH {
             all_num_shortcuts += num_created;
             all_num_contracted += num_contracted;
             
-            println!("Created {} / Contracted {} at level {}", all_num_shortcuts, all_num_contracted, level);
+            // println!("Created {} / Contracted {} at level {}", all_num_shortcuts, all_num_contracted, level);
 
             // Increase level for next independent set
             level += 1;

@@ -158,18 +158,21 @@ impl Graph {
     pub fn outgoing_edges(&self, idx: usize) -> impl Iterator<Item = (usize, u64)> + '_  {
         self.edges[idx]
             .iter()
+            .rev()
             .filter_map(|(to, weight, dir)| dir.then_some((*to, *weight)))
     }
 
     pub fn incoming_edges(&self, idx: usize) -> impl Iterator<Item = (usize, u64)> + '_  {
         self.edges[idx]
             .iter()
+            .rev()
             .filter_map(|(to, weight, dir)| (!dir).then_some((*to, *weight)))
     }
 
     pub fn edges(&self, idx: usize) -> impl Iterator<Item = (usize, u64)> + '_ {
         self.edges[idx]
             .iter()
+            .rev()
             .map(|(to, weight, _)| (*to, *weight))
     }
 

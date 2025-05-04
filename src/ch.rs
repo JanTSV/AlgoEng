@@ -105,7 +105,7 @@ impl CH {
         distance
     }
 
-    fn calc_shortcuts(&self, node: usize, contracted: &Vec<bool>) -> Vec<Shortcut> {
+    fn calc_shortcuts(&self, node: usize, contracted: &[u64]) -> Vec<Shortcut> {
         // (from, to, weight, edge_id_a, edge_id_b)
         let mut shortcuts: Vec<Shortcut> = Vec::new();
         let mut dijkstra = Dijkstra::new(&self.graph);
@@ -115,7 +115,8 @@ impl CH {
             for (edge_id_a, outgoing_edge) in self.graph.outgoing_edges(node).iter().enumerate() {
                 let outgoing_node = outgoing_edge.to;
 
-                if contracted[incoming_node] || contracted[outgoing_node] {
+                if ((contracted[incoming_node / 64]) & (1 << (incoming_node % 64)) != 0) || 
+                   ((contracted[outgoing_node / 64]) & (1 << (outgoing_node % 64)) != 0) {
                     continue;
                 }
 
@@ -138,7 +139,7 @@ impl CH {
         &mut self,
         indep_set: &Vec<(i64, usize)>,
         level: usize,
-        contracted: &mut Vec<bool>
+        contracted: &mut [u64]
     ) -> (usize, usize) {
     
         // Compute shortcuts for part of independent set with low edge diff
@@ -163,7 +164,7 @@ impl CH {
             }
             
             self.graph.node_at_mut(node).level = level;
-            contracted[node] = true;
+            contracted[node / 64] |= 1 << (node % 64);
             num_contracted += 1;
         }
 
@@ -175,7 +176,7 @@ impl CH {
 
     pub fn batch_preprocess(&mut self) -> usize {
         let mut level = 0;
-        let mut contracted = vec![false; self.graph.nodes_num()];
+        let mut contracted = vec![0u64; self.graph.nodes_num().div_ceil(64)];
         let mut num_shortcuts = 0;
     
         loop {
@@ -242,12 +243,12 @@ impl CH {
         false
     }
     
-    fn find_independent_set(&self, contracted: &Vec<bool>) -> Vec<(i64, usize)> {
+    fn find_independent_set(&self, contracted: &[u64]) -> Vec<(i64, usize)> {
         let mut independent_set: Vec<(i64, usize)> = Vec::new();
-        let mut blocked = vec![false; self.graph.nodes_num()];
+        let mut blocked = vec![0u64; self.graph.nodes_num().div_ceil(64)];
     
         for node in 0..self.graph.nodes_num() {
-            if contracted[node] || blocked[node] {
+            if (blocked[node / 64] | contracted[node / 64]) & (1 << (node % 64)) != 0 {
                 continue;
             }
 
@@ -257,10 +258,10 @@ impl CH {
             independent_set.push((incoming_num * outgoing_num - incoming_num - outgoing_num, node));
             // Block its neighbors from being selected
             for edge in self.graph.outgoing_edges(node) {
-                blocked[edge.to] = true;
+                blocked[edge.to / 64] |= 1 << (edge.to % 64);
             }
             for edge in self.graph.incoming_edges(node) {
-                blocked[edge.to] = true;
+                blocked[edge.to / 64] |= 1 << (edge.to % 64);
             }
         }
 

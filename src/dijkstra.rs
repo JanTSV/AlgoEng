@@ -41,7 +41,7 @@ impl<'a> Dijkstra<'a> {
         Dijkstra { graph, weights: vec![None; graph.nodes_num()], heap: BinaryHeap::new(), visited: Vec::new() }
     }
 
-    pub fn shortest_path_consider_contraction(&mut self, s: usize, t: usize, contracted: &Vec<bool>) -> Option<u64> {
+    pub fn shortest_path_consider_contraction(&mut self, s: usize, t: usize, contracted: &[u64]) -> Option<u64> {
         // Cleanup of previous run
         while let Some(node) = self.visited.pop() {
             self.weights[node] = None;
@@ -59,7 +59,7 @@ impl<'a> Dijkstra<'a> {
             }
 
             for edge in self.graph.outgoing_edges(id) {
-                if contracted[edge.to] {
+                if contracted[edge.to / 64] & (1 << (edge.to % 64)) != 0 {
                     continue;
                 }
 

@@ -109,24 +109,37 @@ impl CH {
         // (from, to, weight, edge_id_a, edge_id_b)
         let mut shortcuts: Vec<Shortcut> = Vec::new();
 
-        for (edge_id_b, incoming_edge) in self.graph.incoming_edges(node).enumerate() {
-            let incoming_node = incoming_edge.0;
-            for (edge_id_a, outgoing_edge) in self.graph.outgoing_edges(node).enumerate() {
-                let outgoing_node = outgoing_edge.0;
+        let predecessors = self
+            .graph
+            .incoming_edges(node)
+            .filter(|(id, _)| contracted[*id/ 64] & (1 << (id % 64)) == 0)
+            .collect::<Vec<_>>();
 
-                if ((contracted[incoming_node / 64]) & (1 << (incoming_node % 64)) != 0) || 
-                   ((contracted[outgoing_node / 64]) & (1 << (outgoing_node % 64)) != 0) {
-                    continue;
-                }
+        let successors = self
+            .graph
+            .outgoing_edges(node)
+            .filter(|(id, _)| contracted[*id / 64] & (1 << (id % 64)) == 0)
+            .collect::<Vec<_>>();
 
-                if let Some(shortest_path) = dijkstra.shortest_path_consider_contraction(incoming_node,outgoing_node, contracted) {
-                    let direct_distance = incoming_edge.1 + outgoing_edge.1;
-                    if shortest_path >= direct_distance {
-                        shortcuts.push((incoming_node, outgoing_node, direct_distance, edge_id_a, edge_id_b));
+        let successor_ids: Vec<_> = successors
+            .iter()
+            .map(|(id, _)| *id)
+            .collect();
+
+        if predecessors.is_empty() || successors.is_empty() {
+            return shortcuts;
+        }
+
+        for (edge_id_b, (pred_id, pred_weight)) in predecessors.iter().enumerate() {
+            let shortest_distances = dijkstra.shortest_path_consider_contraction(*pred_id, &successor_ids, contracted);
+            assert_eq!(shortest_distances.len(), successors.len());
+
+            for (edge_id_a, (succ_id, succ_weight)) in successors.iter().enumerate() {
+                let direct_distance = *pred_weight + *succ_weight;
+                if let Some((_, shortest_distance)) = shortest_distances.iter().find(|(id, _)| *succ_id == *id) {
+                    if *shortest_distance >= direct_distance {
+                        shortcuts.push((*pred_id, *succ_id, direct_distance, edge_id_a, edge_id_b));
                     }
-                } else {
-                    println!("this shouldn't happen: {} -> {}", incoming_node, outgoing_node);
-                    exit(0);
                 }
             }
         }
@@ -145,7 +158,7 @@ impl CH {
         // Compute shortcuts for part of independent set with low edge diff
         let n = indep_set.len().div_ceil(6);
         let sub_indep_set = &indep_set[..n];
-        let chunk_size = n.div_ceil(rayon::current_num_threads());
+        let chunk_size = n;// .div_ceil(rayon::current_num_threads());
     
         let results: Vec<(usize, Vec<Shortcut>)> = sub_indep_set
             .par_chunks(chunk_size)

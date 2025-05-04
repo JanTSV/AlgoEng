@@ -41,8 +41,10 @@ impl<'a> Dijkstra<'a> {
         Dijkstra { graph, weights: vec![None; graph.num_nodes()], heap: BinaryHeap::new(), visited: Vec::new() }
     }
 
-    pub fn shortest_path_consider_contraction(&mut self, s: usize, t: usize, contracted: &[u64]) -> Option<u64> {
+    pub fn shortest_path_consider_contraction(&mut self, s: usize, ts: &[usize], contracted: &[u64]) -> Vec<(usize, u64)> {
         // Cleanup of previous run
+        let mut results = Vec::new();
+
         while let Some(node) = self.visited.pop() {
             self.weights[node] = None;
         }
@@ -54,8 +56,12 @@ impl<'a> Dijkstra<'a> {
         self.visited.push(s);
 
         while let Some(Distance { weight, id }) = self.heap.pop() {
-            if id == t {
-                return Some(weight);
+            if ts.contains(&id) {
+                results.push((id, weight));
+
+                if results.len() == ts.len() {
+                    return results;
+                }
             }
 
             for edge in self.graph.outgoing_edges(id) {
@@ -71,7 +77,7 @@ impl<'a> Dijkstra<'a> {
             }
         }
 
-        None
+        results
     }
 
     pub fn shortest_path(&mut self, s: usize, t: usize) -> Option<u64> {

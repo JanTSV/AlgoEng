@@ -145,35 +145,38 @@ impl CH {
     
         // Compute shortcuts for part of independent set with low edge diff
         let n = indep_set.len().div_ceil(6);
-        let results: Vec<_> = indep_set
-            .par_iter()
-            .take(n)
-            .map(|&(_, node)| {
-                let shortcuts = self.calc_shortcuts(node, contracted);
-                (node, shortcuts)
+        let sub_indep_set = &indep_set[..n];
+        let chunk_size = n.div_ceil(rayon::current_num_threads());
+    
+        let results: Vec<(usize, Vec<Shortcut>)> = sub_indep_set
+            .par_chunks(chunk_size)
+            .flat_map(|chunk| {
+                chunk.iter().map(|&(_, node)| {
+                    let shortcuts = self.calc_shortcuts(node, contracted);
+                    (node, shortcuts)
+                }).collect::<Vec<_>>() // collect per chunk to allow flat_map
             })
             .collect();
-        
+    
         let mut num_created = 0;
         let num_contracted = results.len();
     
-        // Add shortcuts
+        // Add shortcuts sequentially (can parallelize too if thread-safe)
         for (node, shortcuts) in results {
             for (from, to, weight, _edge_id_a, _edge_id_b) in shortcuts {
                 self.graph.add_edge(from, to, weight);
                 num_created += 1;
             }
-            
+    
             self.graph.node_at_mut(node).level = level;
             contracted[node / 64] |= 1 << (node % 64);
         }
-
+    
         for i in n..indep_set.len() {
             let node = indep_set[i].1;
             assert!((contracted[node / 64]) & (1 << (node % 64)) == 0);
             nodes.push(node);
         }
-    
     
         (num_contracted, num_created)
     }

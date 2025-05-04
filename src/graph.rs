@@ -1,6 +1,5 @@
 use std::{fs::OpenOptions, error::Error};
 use std::io::Write;
-use std::fs::File;
 use std::io::{BufRead, BufReader};
 
 
@@ -52,25 +51,33 @@ pub struct OffsetArray {
 
 impl OffsetArray {
     pub fn from_file(filename: &str) -> Result<Self, Box<dyn Error>> {
-        let file = File::open(filename)?;
-        let reader = BufReader::new(file);
+        let file = OpenOptions::new()
+        .read(true)
+        .open(filename)?;
 
-        // Filter out comments and empty lines
-        let mut lines = reader
-            .lines()
-            .map_while(Result::ok)
-            .map(|line| line.trim().to_string())
-            .filter(|line| !line.is_empty() && !line.starts_with('#'));
+        let mut reader = BufReader::new(file);
+
+        let mut line = String::new();
+        reader.read_line(&mut line)?;
+
+        while line.starts_with('#') || line.trim().is_empty() {
+            line.clear();
+            reader.read_line(&mut line)?;
+        }
 
         // Parse number of nodes and edges
-        let num_nodes: usize = lines.next().ok_or("Missing number of nodes")?.parse()?;
-        let num_edges: usize = lines.next().ok_or("Missing number of edges")?.parse()?;
+        let num_nodes: usize = line.trim().parse().expect("Missing number of nodes");
+
+        line.clear();
+        reader.read_line(&mut line)?;
+        let num_edges: usize = line.trim().parse().expect("Missing number of edges");
 
         let mut graph = Self::new(num_nodes, num_edges);
 
         // Parse nodes
         for _i in 0..num_nodes {
-            let line = lines.next().ok_or("Missing edge line")?;
+            line.clear();
+            reader.read_line(&mut line)?;
             let parts: Vec<&str> = line.split_whitespace().collect();
             
             if parts.len() < 5 {
@@ -95,7 +102,8 @@ impl OffsetArray {
 
         // Parse edges
         for _ in 0..num_edges {
-            let line = lines.next().ok_or("Missing edge line")?;
+            line.clear();
+            reader.read_line(&mut line)?;
             let parts: Vec<&str> = line.split_whitespace().collect();
     
             if parts.len() < 5 {

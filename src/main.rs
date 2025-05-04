@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::{ch::CH, graph::OffsetArray};
+use crate::{ch::CH, graph::Graph};
 
 mod graph;
 mod reader;
@@ -11,7 +11,7 @@ fn main() {
     // Load graph
     let start = Instant::now();
     println!("Started parsing...");
-    let graph = OffsetArray::from_file("inputs/MV.fmi").unwrap();
+    let graph = Graph::from_file("inputs/MV.fmi").unwrap();
     let duration = start.elapsed();
     println!("Loaded graph in {:.2?}", duration);
 

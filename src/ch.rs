@@ -3,13 +3,13 @@ use std::process::exit;
 
 use rayon::prelude::*;
 
-use crate::graph::{OffsetArray, Edge};
+use crate::graph::{Graph, Edge};
 use crate::dijkstra::{Distance, Dijkstra};
 
 type Shortcut = (usize, usize, u64, usize, usize);
 
 pub struct CH {
-    graph: OffsetArray,
+    graph: Graph,
 
     // s -> t
     distances: Vec<Option<u64>>,
@@ -22,7 +22,7 @@ pub struct CH {
 }
 
 impl CH {
-    pub fn new(graph: OffsetArray) -> Self {
+    pub fn new(graph: Graph) -> Self {
         let n = graph.nodes_num();
         CH { graph, 
              distances: vec![None; n], 
@@ -33,7 +33,7 @@ impl CH {
         }
     }
 
-    pub fn get_graph(&self) -> &OffsetArray {
+    pub fn get_graph(&self) -> &Graph {
         &self.graph
     }
 
@@ -110,9 +110,9 @@ impl CH {
         let mut shortcuts: Vec<Shortcut> = Vec::new();
         let mut dijkstra = Dijkstra::new(&self.graph);
 
-        for (edge_id_b, incoming_edge) in self.graph.incoming_edges(node).iter().enumerate() {
+        for (edge_id_b, incoming_edge) in self.graph.incoming_edges(node).enumerate() {
             let incoming_node = incoming_edge.to;
-            for (edge_id_a, outgoing_edge) in self.graph.outgoing_edges(node).iter().enumerate() {
+            for (edge_id_a, outgoing_edge) in self.graph.outgoing_edges(node).enumerate() {
                 let outgoing_node = outgoing_edge.to;
 
                 if ((contracted[incoming_node / 64]) & (1 << (incoming_node % 64)) != 0) || 
@@ -154,7 +154,7 @@ impl CH {
             .collect();
     
         let mut num_created = 0;
-        let mut num_contracted = 0;
+        let num_contracted = results.len();
     
         // Add shortcuts
         for (node, shortcuts) in results {
@@ -165,7 +165,6 @@ impl CH {
             
             self.graph.node_at_mut(node).level = level;
             contracted[node / 64] |= 1 << (node % 64);
-            num_contracted += 1;
         }
 
         // Rebuild graph offsets
@@ -252,8 +251,8 @@ impl CH {
                 continue;
             }
 
-            let incoming_num = self.graph.incoming_edges(node).len() as i64; 
-            let outgoing_num = self.graph.outgoing_edges(node).len() as i64; 
+            let incoming_num = self.graph.incoming_edges(node).count() as i64; 
+            let outgoing_num = self.graph.outgoing_edges(node).count() as i64; 
 
             independent_set.push((incoming_num * outgoing_num - incoming_num - outgoing_num, node));
             // Block its neighbors from being selected
@@ -277,7 +276,7 @@ mod test_ch {
 
     use super::CH;
     use crate::dijkstra::Dijkstra;
-    use crate::graph::OffsetArray;
+    use crate::graph::Graph;
     use crate::reader::parse_queries;
 
     #[test]
@@ -285,7 +284,7 @@ mod test_ch {
         // Load graph with CH levels
         let start = Instant::now();
         println!("Started parsing...");
-        let graph = OffsetArray::from_file("inputs/stgtregbz_ch.fmi").unwrap();
+        let graph = Graph::from_file("inputs/stgtregbz_ch.fmi").unwrap();
         let duration = start.elapsed();
         println!("Loaded graph in {:.2?}", duration);
 
@@ -323,7 +322,7 @@ mod test_ch {
         // Load graph with CH levels
         let start = Instant::now();
         println!("Started parsing...");
-        let graph = OffsetArray::from_file("inputs/stgtregbz_ch.fmi").unwrap();
+        let graph = Graph::from_file("inputs/stgtregbz_ch.fmi").unwrap();
         let duration = start.elapsed();
         println!("Loaded graph in {:.2?}", duration);
 
@@ -360,7 +359,7 @@ mod test_ch {
     fn test_ch_own_preprocessing() {
         // Load graph
         let queries = parse_queries("inputs/queries.txt").unwrap();
-        let graph = OffsetArray::from_file("inputs/MV.fmi").unwrap();
+        let graph = Graph::from_file("inputs/MV.fmi").unwrap();
         let mut ch = CH::new(graph);
 
         // Preprocess

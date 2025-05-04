@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use crate::graph::OffsetArray;
+use crate::graph::Graph;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct Distance {
@@ -30,14 +30,14 @@ impl PartialOrd for Distance {
 }
 
 pub struct Dijkstra<'a> {
-    graph: &'a OffsetArray,
+    graph: &'a Graph,
     weights: Vec<Option<u64>>,
     heap: BinaryHeap<Distance>,
     visited: Vec<usize>
 }
 
 impl<'a> Dijkstra<'a> {
-    pub fn new(graph: &'a OffsetArray) -> Self {
+    pub fn new(graph: &'a Graph) -> Self {
         Dijkstra { graph, weights: vec![None; graph.nodes_num()], heap: BinaryHeap::new(), visited: Vec::new() }
     }
 
@@ -108,14 +108,14 @@ impl<'a> Dijkstra<'a> {
 mod test_dijkstra {
     use std::time::Instant;
 
-    use crate::{reader::parse_queries, graph::OffsetArray};
+    use crate::{reader::parse_queries, graph::Graph};
 
     use super::Dijkstra;
 
     #[test]
     fn test_dijkstra_in_mv() {
         let queries = parse_queries("inputs/queries.txt").unwrap();
-        let graph = OffsetArray::from_file("inputs/MV.fmi").unwrap();
+        let graph = Graph::from_file("inputs/MV.fmi").unwrap();
         let mut dijkstra = Dijkstra::new(&graph);
 
         let expected = [Some(210922),

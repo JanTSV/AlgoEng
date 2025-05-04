@@ -36,7 +36,7 @@ impl Node {
 }
 
 #[derive(Debug, Clone)]
-pub struct OffsetArray {
+pub struct Graph {
     // Offsets
     offsets: Vec<usize>,
     reverse_offsets: Vec<usize>,
@@ -49,7 +49,7 @@ pub struct OffsetArray {
     reverse_edges: Vec<Edge>
 }
 
-impl OffsetArray {
+impl Graph {
     pub fn from_file(filename: &str) -> Result<Self, Box<dyn Error>> {
         let file = OpenOptions::new()
         .read(true)
@@ -197,7 +197,7 @@ impl OffsetArray {
     }
 
     fn new(num_nodes: usize, num_edges: usize) -> Self {
-        OffsetArray { offsets: Vec::with_capacity(num_nodes + 1), reverse_offsets: Vec::with_capacity(num_nodes + 1), nodes: Vec::with_capacity(num_nodes), edges: Vec::with_capacity(num_edges), reverse_edges: Vec::with_capacity(num_edges) }
+        Graph { offsets: Vec::with_capacity(num_nodes + 1), reverse_offsets: Vec::with_capacity(num_nodes + 1), nodes: Vec::with_capacity(num_nodes), edges: Vec::with_capacity(num_edges), reverse_edges: Vec::with_capacity(num_edges) }
     }
 
     pub fn node_at(&self, idx: usize) -> &Node {
@@ -208,12 +208,12 @@ impl OffsetArray {
         &mut self.nodes[idx]
     }
 
-    pub fn outgoing_edges(&self, idx: usize) -> &[Edge] {
-         &self.edges[self.offsets[idx]..self.offsets[idx + 1]]
+    pub fn outgoing_edges(&self, idx: usize) -> impl Iterator<Item = &Edge> {
+         self.edges[self.offsets[idx]..self.offsets[idx + 1]].iter()
     }
 
-    pub fn incoming_edges(&self, idx: usize) -> &[Edge] {
-         &self.reverse_edges[self.reverse_offsets[idx]..self.reverse_offsets[idx + 1]]
+    pub fn incoming_edges(&self, idx: usize) -> impl Iterator<Item = &Edge> {
+         self.reverse_edges[self.reverse_offsets[idx]..self.reverse_offsets[idx + 1]].iter()
     }
 
     pub fn num_edges(&self) -> usize {
@@ -271,11 +271,11 @@ impl OffsetArray {
 
 #[cfg(test)]
 mod test_offset_array {
-    use super::OffsetArray;
+    use super::Graph;
 
     #[test]
     fn test_offset_array_parse_toy() {
-        let graph = OffsetArray::from_file("inputs/toy.fmi").unwrap();
+        let graph = Graph::from_file("inputs/toy.fmi").unwrap();
         assert_eq!(graph.nodes.len(), 5);
         assert_eq!(graph.edges.len(), 9);
         assert_eq!(graph.offsets.len(), 6);
@@ -286,7 +286,7 @@ mod test_offset_array {
     
     #[test]
     fn test_offset_array_parse_mv() {
-        let graph = OffsetArray::from_file("inputs/MV.fmi").unwrap();
+        let graph = Graph::from_file("inputs/MV.fmi").unwrap();
         assert_eq!(graph.nodes.len(), 644199);
         assert_eq!(graph.edges.len(), 1305996);
         assert_eq!(graph.offsets.len(), 644200);

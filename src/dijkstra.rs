@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+use std::collections::{HashSet, HashMap};
 
 use crate::graph::Graph;
 
@@ -41,10 +42,8 @@ impl<'a> Dijkstra<'a> {
         Dijkstra { graph, weights: vec![None; graph.num_nodes()], heap: BinaryHeap::new(), visited: Vec::new() }
     }
 
-    pub fn shortest_path_consider_contraction(&mut self, s: usize, ts: &[usize], contracted: &[u64]) -> Vec<(usize, u64)> {
+    pub fn _shortest_path_consider_contraction(&mut self, s: usize, t: usize, contracted: &[u64]) -> Option<u64> {
         // Cleanup of previous run
-        let mut results = Vec::new();
-
         while let Some(node) = self.visited.pop() {
             self.weights[node] = None;
         }
@@ -56,11 +55,57 @@ impl<'a> Dijkstra<'a> {
         self.visited.push(s);
 
         while let Some(Distance { weight, id }) = self.heap.pop() {
-            if ts.contains(&id) {
-                results.push((id, weight));
+            if id == t {
+                return Some(weight);
+            }
 
-                if results.len() == ts.len() {
-                    return results;
+            for edge in self.graph.outgoing_edges(id) {
+                if contracted[edge.0 / 64] & (1 << (edge.0 % 64)) != 0 {
+                    continue;
+                }
+
+                if self.weights[edge.0].is_none_or(|curr| weight + edge.1 < curr) {
+                    self.weights[edge.0] = Some(weight + edge.1);
+                    self.heap.push(Distance::new(weight + edge.1, edge.0));
+                    self.visited.push(edge.0);
+                }
+            }
+        }
+
+        None
+    }
+
+    pub fn shortest_path_consider_contraction(&mut self, s: usize, ts: &[usize], contracted: &[u64]) -> HashMap<usize, u64> {
+        let target_set: HashSet<usize> = ts.iter().cloned().collect();
+        let mut found: HashMap<usize, u64> = HashMap::new();
+        let mut optimized = vec![0u64; self.graph.num_nodes().div_ceil(64)];
+
+        
+        // Cleanup of previous run
+        while let Some(node) = self.visited.pop() {
+            self.weights[node] = None;
+        }
+        self.heap.clear();
+
+        // Push start to heap and set dist to 0
+        self.heap.push(Distance::new(0, s));
+        self.weights[s] = Some(0);
+        self.visited.push(s);
+
+        while let Some(Distance { weight, id }) = self.heap.pop() {
+            // Skip already optimized nodes
+            if optimized[id / 64] & (1 << (id % 64)) != 0 {
+                continue;
+            }
+
+            // Mark as optimized
+            optimized[id / 64] |= 1 << (id % 64);
+
+            if target_set.contains(&id) && !found.contains_key(&id) {
+                found.insert(id, weight);
+
+                if found.len() == target_set.len() {
+                    return found;
                 }
             }
 
@@ -77,7 +122,7 @@ impl<'a> Dijkstra<'a> {
             }
         }
 
-        results
+        found
     }
 
     pub fn shortest_path(&mut self, s: usize, t: usize) -> Option<u64> {

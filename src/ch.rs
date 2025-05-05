@@ -112,7 +112,7 @@ impl CH {
         let predecessors = self
             .graph
             .incoming_edges(node)
-            .filter(|(id, _)| contracted[*id/ 64] & (1 << (id % 64)) == 0)
+            .filter(|(id, _)| contracted[*id / 64] & (1 << (id % 64)) == 0)
             .collect::<Vec<_>>();
 
         let successors = self
@@ -131,15 +131,15 @@ impl CH {
         }
 
         for (edge_id_b, (pred_id, pred_weight)) in predecessors.iter().enumerate() {
-            let shortest_distances = dijkstra.shortest_path_consider_contraction(*pred_id, &successor_ids, contracted);
-            assert_eq!(shortest_distances.len(), successors.len());
+            // let shortest_distances = dijkstra.shortest_path_consider_contraction(*pred_id, &successor_ids, contracted);
 
             for (edge_id_a, (succ_id, succ_weight)) in successors.iter().enumerate() {
                 let direct_distance = *pred_weight + *succ_weight;
-                if let Some((_, shortest_distance)) = shortest_distances.iter().find(|(id, _)| *succ_id == *id) {
-                    if *shortest_distance >= direct_distance {
-                        shortcuts.push((*pred_id, *succ_id, direct_distance, edge_id_a, edge_id_b));
-                    }
+                let shortest_distance = dijkstra._shortest_path_consider_contraction(*pred_id, *succ_id, contracted).expect("WHOOPS");
+                
+                // let &shortest_distance = shortest_distances.get(succ_id).expect("WHOOPS");
+                if shortest_distance >= direct_distance {
+                    shortcuts.push((*pred_id, *succ_id, direct_distance, edge_id_a, edge_id_b));
                 }
             }
         }
@@ -213,7 +213,7 @@ impl CH {
             all_num_shortcuts += num_created;
             all_num_contracted += num_contracted;
             
-            println!("Created {} / Contracted {} at level {}", all_num_shortcuts, all_num_contracted, level);
+            // println!("Created {} / Contracted {} at level {}", all_num_shortcuts, all_num_contracted, level);
 
             // Increase level for next independent set
             level += 1;

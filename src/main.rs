@@ -9,8 +9,8 @@ mod ch;
 
 fn main() {
     // Inputs
-    const GRAPH: &str = "inputs/MV.fmi";
-    const QUERRIES: &str = "inputs/querries.txt";
+    const GRAPH: &str = "inputs/germany.fmi";
+    const QUERRIES: &str = "inputs/querries_germany.txt";
     const OUTPUT: &str = "graph.ch";
 
     // Outputs
@@ -50,7 +50,7 @@ fn main() {
     // Print out the graph
     let start = Instant::now();
     writeln!(log, "Writing graph to file...").unwrap();
-    //TODO: ch.get_graph().to_file(OUTPUT, GRAPH).unwrap();
+    // ch.get_graph().to_file(OUTPUT, GRAPH).unwrap();
     let duration = start.elapsed();
     writeln!(log, "Written in {:.2?}", duration).unwrap();
 

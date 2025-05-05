@@ -45,45 +45,45 @@ impl<'a> Dijkstra<'a> {
         Dijkstra { graph, weights: vec![None; graph.num_nodes()], heap: BinaryHeap::new(), visited: Vec::new(), old_start: None, optimized: vec![0u64; graph.num_nodes().div_ceil(64)] }
     }
 
-    pub fn _shortest_path_consider_contraction(&mut self, s: usize, t: usize, contracted: &[u64]) -> Option<u64> {
-        // Cleanup of previous run
-        while let Some(node) = self.visited.pop() {
-            self.weights[node] = None;
-            self.optimized[node / 64] &= !(1 << (node % 64));
-        }
-        self.heap.clear();
-
-        // Push start to heap and set dist to 0
-        self.heap.push(Distance::new(0, s));
-        self.weights[s] = Some(0);
-        self.visited.push(s);
-
-        while let Some(Distance { weight, id }) = self.heap.pop() {
-            if self.optimized[id / 64] & (1 << (id % 64)) != 0 {
-                continue;
-            }
-
-            self.optimized[id / 64] |= 1 << (id % 64);
-
-            if id == t {
-                return Some(weight);
-            }
-
-            for edge in self.graph.outgoing_edges(id) {
-                if contracted[edge.0 / 64] & (1 << (edge.0 % 64)) != 0 {
-                    continue;
-                }
-
-                if self.weights[edge.0].is_none_or(|curr| weight + edge.1 < curr) {
-                    self.weights[edge.0] = Some(weight + edge.1);
-                    self.heap.push(Distance::new(weight + edge.1, edge.0));
-                    self.visited.push(edge.0);
-                }
-            }
-        }
-
-        None
-    }
+    //pub fn _shortest_path_consider_contraction(&mut self, s: usize, t: usize, contracted: &[u64]) -> Option<u64> {
+    //    // Cleanup of previous run
+    //    while let Some(node) = self.visited.pop() {
+    //        self.weights[node] = None;
+    //        self.optimized[node / 64] &= !(1 << (node % 64));
+    //    }
+    //    self.heap.clear();
+    //
+    //    // Push start to heap and set dist to 0
+    //    self.heap.push(Distance::new(0, s));
+    //    self.weights[s] = Some(0);
+    //    self.visited.push(s);
+    //
+    //    while let Some(Distance { weight, id }) = self.heap.pop() {
+    //        if self.optimized[id / 64] & (1 << (id % 64)) != 0 {
+    //            continue;
+    //        }
+    //
+    //        self.optimized[id / 64] |= 1 << (id % 64);
+    //
+    //        if id == t {
+    //            return Some(weight);
+    //        }
+    //
+    //        for edge in self.graph.outgoing_edges(id) {
+    //            if contracted[edge.0 / 64] & (1 << (edge.0 % 64)) != 0 {
+    //                continue;
+    //            }
+    //
+    //            if self.weights[edge.0].is_none_or(|curr| weight + edge.1 < curr) {
+    //                self.weights[edge.0] = Some(weight + edge.1);
+    //                self.heap.push(Distance::new(weight + edge.1, edge.0));
+    //                self.visited.push(edge.0);
+    //            }
+    //        }
+    //    }
+    //
+    //    None
+    //}
 
     pub fn shortest_path_consider_contraction(&mut self, s: usize, t: usize, contracted: &[u64]) -> Option<u64> {
         if let Some(weight) = self.reset(s, t) {

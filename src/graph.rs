@@ -1,25 +1,7 @@
-use std::ops::Index;
 use std::{fs::OpenOptions, error::Error};
 use std::io::Write;
 use std::io::{BufRead, BufReader};
 
-
-#[derive(Debug, Clone)]
-pub struct Edge {
-    pub from: usize,
-    pub to: usize,
-    pub weight: u64,
-    pub typ: u64,
-    pub max_speed: i64,
-    pub edge_id_a: Option<usize>,
-    pub edge_id_b: Option<usize>,
-}
-
-impl Edge {
-    pub fn new(from: usize, to: usize, weight: u64, typ: u64, max_speed: i64, edge_id_a: Option<usize>, edge_id_b: Option<usize>) -> Self {
-        Edge { from, to, weight, typ, max_speed, edge_id_a, edge_id_b }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct Node {
@@ -36,14 +18,16 @@ impl Node {
 pub struct Graph {
     // Nodes
     nodes: Vec<Node>,
-    edges: Vec<Vec<(usize, u64, bool)>>,
+
+    // (to, weight, direction, (replaced_node, edge_id_a, edge_id_b))
+    edges: Vec<Vec<(usize, u64, bool, Option<(usize, usize, usize)>)>>,
 }
 
 impl Graph {
     pub fn from_file(filename: &str) -> Result<Self, Box<dyn Error>> {
         let file = OpenOptions::new()
-        .read(true)
-        .open(filename)?;
+            .read(true)
+            .open(filename)?;
 
         let mut reader = BufReader::new(file);
 
@@ -62,7 +46,7 @@ impl Graph {
         reader.read_line(&mut line)?;
         let num_edges: usize = line.trim().parse().expect("Missing number of edges");
 
-        let mut graph = Self::new(num_nodes, num_edges);
+        let mut graph = Self::new(num_nodes);
 
         // Parse nodes
         for _i in 0..num_nodes {
@@ -103,21 +87,21 @@ impl Graph {
             let source: usize = parts[0].parse()?;
             let target: usize = parts[1].parse()?;
             let weight: u64 = parts[2].parse()?;
-            let typ: u64 = parts[3].parse()?;
-            let max_speed: i64 = parts[4].parse()?;
-            let edge_id_a: Option<usize> = if parts.len() > 5 {
-                parts[5].parse().ok()
-            } else {
-                None
-            };
-            let edge_id_b: Option<usize> = if parts.len() > 6 {
-                parts[6].parse().ok()
-            } else {
-                None
-            };
+            //let typ: u64 = parts[3].parse()?;
+            //let max_speed: i64 = parts[4].parse()?;
+            //let edge_id_a: Option<usize> = if parts.len() > 5 {
+            //    parts[5].parse().ok()
+            //} else {
+            //    None
+            //};
+            //let edge_id_b: Option<usize> = if parts.len() > 6 {
+            //    parts[6].parse().ok()
+            //} else {
+            //    None
+            //};
             
-            graph.edges[source].push((target, weight, true));
-            graph.edges[target].push((source, weight, false));
+            graph.edges[source].push((target, weight, true, None));
+            graph.edges[target].push((source, weight, false, None));
         }
 
         assert_eq!(num_nodes, graph.nodes.len());
@@ -130,7 +114,7 @@ impl Graph {
     pub fn num_edges(&self) -> usize {
         self.edges
             .iter()
-            .map(|edge| edge.iter().filter(|(_, _, forward)| *forward).count())
+            .map(|edge| edge.iter().filter(|(_, _, forward, _)| *forward).count())
             .sum()
     }
 
@@ -138,12 +122,12 @@ impl Graph {
         self.nodes.len()
     } 
 
-    pub fn add_edge(&mut self, from: usize, to: usize, weight: u64) {
-        self.edges[from].push((to, weight, true));
-        self.edges[to].push((from, weight, false));
+    pub fn add_edge(&mut self, from: usize, to: usize, weight: u64, replaced: Option<(usize, usize, usize)>) {
+        self.edges[from].push((to, weight, true, replaced));
+        self.edges[to].push((from, weight, false, None));
     }
 
-    fn new(num_nodes: usize, num_edges: usize) -> Self {
+    fn new(num_nodes: usize) -> Self {
         Graph { nodes: Vec::with_capacity(num_nodes), edges: vec![Vec::new(); num_nodes] }
     }
 
@@ -158,30 +142,92 @@ impl Graph {
     pub fn outgoing_edges(&self, idx: usize) -> impl Iterator<Item = (usize, u64)> + '_ + DoubleEndedIterator {
         self.edges[idx]
             .iter()
-            .rev()
-            .filter_map(|(to, weight, dir)| dir.then_some((*to, *weight)))
+            .filter_map(|(to, weight, dir, _)| dir.then_some((*to, *weight)))
+    }
+
+    fn shortcuts(&self, idx: usize) -> impl Iterator<Item = (usize, u64, usize, usize, usize)> + '_ + DoubleEndedIterator {
+        self.edges[idx]
+            .iter()
+            .filter_map(|(to, weight, dir, replaced)| {
+                if *dir {
+                    replaced.map(|(node, edge_id_a, edge_id_b)| {
+                        (*to, *weight, node, edge_id_a, edge_id_b)
+                    })
+                } else {
+                    None
+                }
+            })
+    }
+
+    fn find_edge(&self, idx: usize, edge_id: usize, dir: bool) -> Option<usize> {
+        let mut edge_ctr = 0_usize;
+        for (i, edge) in self.edges[idx].iter().enumerate() {
+            if edge.2 == dir {
+                edge_ctr += 1;
+            }
+
+            if edge_id + 1 == edge_ctr {
+                assert_eq!(edge.2, dir);
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    fn calc_outgoing_edge_id(&self, idx: usize, edge_id_a: usize) -> usize {
+        // Must be outgoing edge
+        self.edge_count_until(idx) + self.find_edge(idx, edge_id_a, true).unwrap()
+    }
+
+    fn edge_count_until(&self, idx: usize) -> usize {
+        self.edges
+            .iter()
+            .take(idx - 1)
+            .map(|edge| edge.iter().filter(|(_, _, forward, _)| *forward).count())
+            .sum::<usize>()
+    }
+
+    fn calc_incoming_edge_id(&self, idx: usize, edge_id_b: usize) -> usize {
+        let incoming_edge = &self.edges[idx][self.find_edge(idx, edge_id_b, false).unwrap()];
+
+        self.edge_count_until(incoming_edge.0) + self.edges[incoming_edge.0]
+            .iter()
+            .position(|(to, ..)| *to == idx )
+            .unwrap()
     }
 
     pub fn incoming_edges(&self, idx: usize) -> impl Iterator<Item = (usize, u64)> + '_ + DoubleEndedIterator  {
         self.edges[idx]
             .iter()
-            .rev()
-            .filter_map(|(to, weight, dir)| (!dir).then_some((*to, *weight)))
+            .filter_map(|(to, weight, dir, _)| (!dir).then_some((*to, *weight)))
     }
 
     pub fn edges(&self, idx: usize) -> impl Iterator<Item = (usize, u64)> + '_ + DoubleEndedIterator {
         self.edges[idx]
             .iter()
-            .rev()
-            .map(|(to, weight, _)| (*to, *weight))
+            .map(|(to, weight, _, _)| (*to, *weight))
     }
 
-    pub fn to_file(&self, filename: &str) -> Result<(), Box<dyn Error>> {
+    pub fn to_file(&self, filename: &str, old_file: &str) -> Result<(), Box<dyn Error>> {
         let mut file = OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .open(filename)?;
+
+        let old_file = OpenOptions::new()
+            .read(true)
+            .open(old_file)?;
+
+        let mut old_reader = BufReader::new(old_file);
+
+        let mut old_line = String::new();
+        old_reader.read_line(&mut old_line)?;
+        
+        while old_line.starts_with('#') || old_line.trim().is_empty() {
+            old_line.clear();
+            old_reader.read_line(&mut old_line)?;
+        }
 
         // Comment header
         for _ in 0..9 {
@@ -192,17 +238,51 @@ impl Graph {
         writeln!(file, "")?;
 
         // #nodes
-        writeln!(file, "{}", self.nodes.len())?;
+        let num_nodes = self.nodes.len();
+        writeln!(file, "{}", num_nodes)?;
+        old_line.clear();
+        old_reader.read_line(&mut old_line)?;
 
         // #edges
-        writeln!(file, "{}", self.num_edges())?;
+        let num_edges = self.num_edges();
+        let old_num_edges: usize = old_line.trim().parse().expect("Missing number of edges");
+        writeln!(file, "{}", num_edges)?;
 
         // Print nodes: <ID> <OSMID> <Lat> <Lon> <Height> <Level>
-        for (id, node) in self.nodes.iter().enumerate() {
-            // TODO: writeln!(file, "{} {} {} {} {} {}", id, node.osm_id, node.lat, node.lon, node.height, node.level)?;
+        for i in 0..num_nodes {
+            old_line.clear();
+            old_reader.read_line(&mut old_line)?;
+            writeln!(file, "{} {}", old_line.trim_end(), self.node_at(i).level)?;
         }
 
-        // TODO: Print edges: <SrcID> <TrgID> <Weight> <Type> <MaxSpeed> <EdgeIdA> <EdgeIdB>
+        // Print edges: <SrcID> <TrgID> <Weight> <Type> <MaxSpeed> <EdgeIdA> <EdgeIdB>
+        let mut prev_source : Option<usize> = None;
+        for _ in 0..old_num_edges {
+            old_line.clear();
+            old_reader.read_line(&mut old_line)?;
+            let parts: Vec<&str> = old_line.split_whitespace().collect();
+    
+            let source: usize = parts[0].parse()?;
+
+            if let Some(prev_source) = prev_source {
+                if prev_source != source {
+                    for (to, weight, node, edge_id_a, edge_id_b) in self.shortcuts(prev_source) {
+                        writeln!(file, "{} {} {} 0 -1 {} {}", prev_source, to, weight, self.calc_outgoing_edge_id(node, edge_id_a), self.calc_incoming_edge_id(node, edge_id_b))?;
+                    }
+                }
+            }
+
+            writeln!(file, "{} -1 -1", old_line.trim_end())?;
+
+            prev_source = Some(source);
+        }
+
+        // Print shortcuts of last node
+        if let Some(prev_source) = prev_source {
+            for (to, weight, node, edge_id_a, edge_id_b) in self.shortcuts(prev_source) {
+                writeln!(file, "{} {} {} 0 -1 {} {}", prev_source, to, weight, self.calc_outgoing_edge_id(node, edge_id_a), self.calc_incoming_edge_id(node, edge_id_b))?;
+            }
+        }
 
         // End empty line
         writeln!(file, "")?;

@@ -236,7 +236,7 @@ mod test_dijkstra {
 
     #[test]
     fn test_dijkstra_in_mv() {
-        let queries = parse_queries("inputs/queries.txt").unwrap();
+        let queries = parse_queries("inputs/querries.txt").unwrap();
         let graph = Graph::from_file("inputs/MV.fmi").unwrap();
         let mut dijkstra = Dijkstra::new(&graph);
 

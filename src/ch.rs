@@ -292,7 +292,7 @@ impl CH {
             // Increase level for next independent set
             level += 1;
         }
-        
+
         all_num_shortcuts
     }
 
@@ -459,7 +459,7 @@ mod test_ch {
     #[test]
     fn test_ch_own_preprocessing() {
         // Load graph
-        let queries = parse_queries("inputs/queries.txt").unwrap();
+        let queries = parse_queries("inputs/querries.txt").unwrap();
         let graph = Graph::from_file("inputs/MV.fmi").unwrap();
         let mut ch = CH::new(graph);
 

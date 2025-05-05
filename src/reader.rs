@@ -31,7 +31,7 @@ mod reader_tests {
 
     #[test]
     fn test_parse_querries() {
-        let queries = parse_queries("inputs/queries.txt").unwrap();
+        let queries = parse_queries("inputs/querries.txt").unwrap();
 
         const EXPECTED: [(usize, usize); 40] = [
             (214733, 429466),

@@ -57,7 +57,7 @@ fn main() {
     // Querry
     for (s, t) in reader::parse_queries(QUERRIES).expect("No querries") {
         let start = Instant::now();
-        let dijkstra_found = ch.shortest_path(s, t, false);
+        let dijkstra_found = ch.shortest_path(s, t, true);
         let duration = start.elapsed().as_micros();
         match dijkstra_found {
             Some(dist) => writeln!(result, "{} {} {} {}", s, t, dist, duration).unwrap(),

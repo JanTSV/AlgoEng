@@ -1,5 +1,6 @@
 use std::collections::BinaryHeap;
 use std::process::exit;
+use std::time::Instant;
 
 use rayon::prelude::*;
 
@@ -64,7 +65,7 @@ impl CH {
                     continue;
                 }
 
-                for edge in self.graph.outgoing_edges(id) {
+                for edge in self.graph.outgoing_edges(id).rev() {
                     if self.distances[edge.0].is_none_or(|curr| weight + edge.1 < curr) && 
                        self.graph.node_at(edge.0).level > self.graph.node_at(id).level {
                         self.distances[edge.0] = Some(weight + edge.1);
@@ -81,7 +82,7 @@ impl CH {
                     continue;
                 }
 
-                for edge in self.graph.incoming_edges(id) {
+                for edge in self.graph.incoming_edges(id).rev() {
                     if self.incoming_distances[edge.0].is_none_or(|curr: u64| weight + edge.1 < curr) && 
                        self.graph.node_at(edge.0).level > self.graph.node_at(id).level {
                         self.incoming_distances[edge.0] = Some(weight + edge.1);
@@ -109,37 +110,28 @@ impl CH {
         // (from, to, weight, edge_id_a, edge_id_b)
         let mut shortcuts: Vec<Shortcut> = Vec::new();
 
-        let predecessors = self
+        for (edge_id_b, (pred_id, pred_weight)) in self
             .graph
             .incoming_edges(node)
-            .filter(|(id, _)| contracted[*id / 64] & (1 << (id % 64)) == 0)
-            .collect::<Vec<_>>();
+            .enumerate() {
 
-        let successors = self
-            .graph
-            .outgoing_edges(node)
-            .filter(|(id, _)| contracted[*id / 64] & (1 << (id % 64)) == 0)
-            .collect::<Vec<_>>();
+            if contracted[pred_id / 64] & (1 << (pred_id % 64)) != 0 {
+                continue;
+            }
 
-        let successor_ids: Vec<_> = successors
-            .iter()
-            .map(|(id, _)| *id)
-            .collect();
+            for (edge_id_a, (succ_id, succ_weight)) in self
+                .graph
+                .outgoing_edges(node)
+                .enumerate() {
+                    
+                if contracted[succ_id / 64] & (1 << (succ_id % 64)) != 0 {
+                    continue;
+                }
 
-        if predecessors.is_empty() || successors.is_empty() {
-            return shortcuts;
-        }
-
-        for (edge_id_b, (pred_id, pred_weight)) in predecessors.iter().enumerate() {
-            // let shortest_distances = dijkstra.shortest_path_consider_contraction(*pred_id, &successor_ids, contracted);
-
-            for (edge_id_a, (succ_id, succ_weight)) in successors.iter().enumerate() {
-                let direct_distance = *pred_weight + *succ_weight;
-                let shortest_distance = dijkstra._shortest_path_consider_contraction(*pred_id, *succ_id, contracted).expect("WHOOPS");
-                
-                // let &shortest_distance = shortest_distances.get(succ_id).expect("WHOOPS");
+                let direct_distance = pred_weight + succ_weight;
+                let shortest_distance = dijkstra.shortest_path_consider_contraction(pred_id, succ_id, contracted).expect("this should never happen");
                 if shortest_distance >= direct_distance {
-                    shortcuts.push((*pred_id, *succ_id, direct_distance, edge_id_a, edge_id_b));
+                    shortcuts.push((pred_id, succ_id, direct_distance, edge_id_a, edge_id_b));
                 }
             }
         }
@@ -156,9 +148,10 @@ impl CH {
     ) -> (usize, usize) {
     
         // Compute shortcuts for part of independent set with low edge diff
+        // let n = 3 * indep_set.len().div_ceil(4);
         let n = indep_set.len().div_ceil(6);
         let sub_indep_set = &indep_set[..n];
-        let chunk_size = n;// .div_ceil(rayon::current_num_threads());
+        let chunk_size = n.div_ceil(rayon::current_num_threads());
     
         let results: Vec<(usize, Vec<Shortcut>)> = sub_indep_set
             .par_chunks(chunk_size)
@@ -167,7 +160,7 @@ impl CH {
                 chunk.iter().map(|&(_, node)| {
                     let shortcuts = self.calc_shortcuts(&mut dijkstra, node, contracted);
                     (node, shortcuts)
-                }).collect::<Vec<_>>() // collect per chunk to allow flat_map
+                }).collect::<Vec<_>>()
             })
             .collect();
     
@@ -200,20 +193,26 @@ impl CH {
         let mut all_num_shortcuts = 0;
         let mut all_num_contracted = 0;
         let mut nodes: Vec<usize> = (0..self.graph.num_nodes()).collect();
+
+        println!("#original edges: {}", self.graph.num_edges());
     
         loop {
             // Find independent set
+            let start = Instant::now();
             let indep_set = self.find_independent_set(&mut nodes);
+            println!("find_independent_set took {:.2?}", start.elapsed());
             if indep_set.is_empty() {
                 break;
             }
 
             // Contract part of independent set with low edge diff
+            let start = Instant::now();
             let (num_contracted, num_created) = self.contract_indep_set(&indep_set, level, &mut contracted, &mut nodes);
+            println!("contract_indep_set took {:.2?}", start.elapsed());
             all_num_shortcuts += num_created;
             all_num_contracted += num_contracted;
             
-            // println!("Created {} / Contracted {} at level {}", all_num_shortcuts, all_num_contracted, level);
+            println!("Created {} / Contracted {} at level {}", all_num_shortcuts, all_num_contracted, level);
 
             // Increase level for next independent set
             level += 1;
@@ -270,6 +269,8 @@ impl CH {
         let mut independent_set: Vec<(isize, usize)> = Vec::new();
         let mut blocked = vec![0u64; self.graph.num_nodes().div_ceil(64)];
         let mut blocked_nodes = Vec::new();
+
+        println!("find_independent_set, #nodes: {}", nodes.len());
     
         for node in nodes.iter().map(|node| *node) {
             if blocked[node / 64] & (1 << (node % 64)) != 0 {

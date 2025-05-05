@@ -20,7 +20,7 @@ fn main() {
 
     let start = Instant::now();
     println!("Started CH preprocessing...");
-    ch.batch_preprocess();
+    ch.NEW_batch_preprocess();
     let duration = start.elapsed();
     println!("Preprocessed in {:.2?}", duration);
 

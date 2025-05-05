@@ -2,7 +2,6 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::error::Error;
 
-
 pub fn parse_queries(filename: &str) -> Result<Vec<(usize, usize)>, Box<dyn Error>> {
     let file = File::open(filename)?;
     let reader = BufReader::new(file);

@@ -18,7 +18,9 @@ pub struct CH {
 
     // t -> s
     incoming_distances: Vec<Option<u64>>,
-    incoming_heap: BinaryHeap<Distance>
+    incoming_heap: BinaryHeap<Distance>,
+
+    optimized: Vec<u64>
 }
 
 impl CH {
@@ -29,7 +31,8 @@ impl CH {
              heap: BinaryHeap::new(), 
              visited: Vec::new(),
              incoming_distances: vec![None; n], 
-             incoming_heap: BinaryHeap::new()
+             incoming_heap: BinaryHeap::new(),
+             optimized: vec![0u64; n.div_ceil(64)],
         }
     }
 
@@ -42,6 +45,7 @@ impl CH {
         while let Some(node) = self.visited.pop() {
             self.distances[node] = None;
             self.incoming_distances[node] = None;
+            self.optimized[node / 64] &= !(1 << (node % 64));
         }
 
         self.heap.clear();
@@ -59,12 +63,20 @@ impl CH {
         while !self.heap.is_empty() || !self.incoming_heap.is_empty() {
             // Dijkstra from s
             if let Some(Distance { weight, id }) = self.heap.pop() {
+                if self.optimized[id / 64] & (1 << (id % 64)) != 0 {
+                    continue;
+                }
+    
+                self.optimized[id / 64] |= 1 << (id % 64);
+
                 // Stall-on-demand
                 if stall_on_demand && self.should_stall_forward(id) {
                     continue;
                 }
 
                 for edge in self.graph.outgoing_edges(id).rev() {
+                    assert!(self.graph.node_at(edge.0).level != usize::MAX);
+                    assert!(self.graph.node_at(id).level != usize::MAX);
                     if self.distances[edge.0].is_none_or(|curr| weight + edge.1 < curr) && 
                        self.graph.node_at(edge.0).level > self.graph.node_at(id).level {
                         self.distances[edge.0] = Some(weight + edge.1);
@@ -76,12 +88,20 @@ impl CH {
 
             // Dijkstra from t
             if let Some(Distance { weight, id }) = self.incoming_heap.pop() {
+                if self.optimized[id / 64] & (1 << (id % 64)) != 0 {
+                    continue;
+                }
+    
+                self.optimized[id / 64] |= 1 << (id % 64);
+
                 // Stall-on-demand
                 if stall_on_demand && self.should_stall_backward(id) {
                     continue;
                 }
 
                 for edge in self.graph.incoming_edges(id).rev() {
+                    assert!(self.graph.node_at(edge.0).level != usize::MAX);
+                    assert!(self.graph.node_at(id).level != usize::MAX);
                     if self.incoming_distances[edge.0].is_none_or(|curr: u64| weight + edge.1 < curr) && 
                        self.graph.node_at(edge.0).level > self.graph.node_at(id).level {
                         self.incoming_distances[edge.0] = Some(weight + edge.1);
@@ -189,12 +209,15 @@ impl CH {
     ) -> (usize, usize) {
         // Compute shortcuts for part of independent set with low edge diff
         //let n = indep_set.len().div_ceil(4);
-        let n = indep_set.len().div_ceil(6);
+        let n = match indep_set.iter().rposition(|x| x.0 <= 0) {
+            Some(idx) => idx,
+            None => indep_set.len().div_ceil(6),
+        };
         let sub_indep_set = &indep_set[..n];
 
         println!("contract_indep_set, n: {}", n);
     
-        let results: Vec<(usize, Vec<Shortcut>)> = if n < rayon::current_num_threads() {
+        let results: Vec<(usize, Vec<Shortcut>)> = if n < rayon::current_num_threads() / 4 {
             sub_indep_set
                 .into_par_iter()
                 .map(|&(_, node)| {

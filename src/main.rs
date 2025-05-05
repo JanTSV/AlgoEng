@@ -20,7 +20,7 @@ fn main() {
 
     let start = Instant::now();
     println!("Started CH preprocessing...");
-    ch.NEW_batch_preprocess();
+    ch.batch_preprocess();
     let duration = start.elapsed();
     println!("Preprocessed in {:.2?}", duration);
 
@@ -36,8 +36,10 @@ fn main() {
     // TODO: querry
 
     // CH
-    const START: usize = 214733;
-    const TARGET: usize = 429466;
+    const START: usize = 8371825;
+    const TARGET: usize = 16743651;
+    //const START: usize = 214733;
+    //const TARGET: usize = 429466;
     print!("CH: ");
     let start = Instant::now();
     let dijkstra_found = ch.shortest_path(START, TARGET, true);

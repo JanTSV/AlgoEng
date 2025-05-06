@@ -11,18 +11,14 @@ pub struct Node {
     osm_id: u64,
     lat: f32,
     lon: f32,
-    level: u16
+    pub level: u16
 }
 
 impl Node {
     pub fn new(osm_id: u64, lat: f32, lon: f32, level: u16) -> Self {
         Node { osm_id, lat, lon, level }
     }
-
-    pub fn get_level(&self) -> &u16 {
-        &self.level
-    }
-
+    
     pub fn set_level(&mut self, level: u16) {
         self.level = level
     }

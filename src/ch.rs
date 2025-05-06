@@ -67,6 +67,7 @@ impl CH {
         }
         let graph = self.graph.read().unwrap();
 
+        let mut distance: Option<u32> = None;
         self.heap.clear();
         self.incoming_heap.clear();
 
@@ -85,19 +86,25 @@ impl CH {
                 if self.optimized[id as usize / 64] & (1 << (id % 64)) != 0 {
                     continue;
                 }
-    
-                self.optimized[id as usize / 64] |= 1 << (id % 64);
 
                 // Stall-on-demand
                 if stall_on_demand && self.should_stall_forward(id) {
                     continue;
                 }
 
+                // Other dijkstra also reached this node
+                if self.incoming_optimized[id as usize / 64] & (1 << (id % 64)) != 0 {
+                    let new_dist = weight + unsafe { self.incoming_distances.get_unchecked(id as usize).unwrap() };
+                    distance = Some(distance.map_or(new_dist, |dist| dist.min(new_dist)));
+                }
+    
+                self.optimized[id as usize / 64] |= 1 << (id % 64);
+
                 for edge in graph.outgoing_edges(id).rev() {
-                    assert!(*graph.node_at(edge.0).get_level() != u16::MAX);
-                    assert!(*graph.node_at(id).get_level() != u16::MAX);
-                    if self.distances[edge.0 as usize].is_none_or(|curr| weight + edge.1 < curr) && 
-                       graph.node_at(edge.0).get_level() > graph.node_at(id).get_level() {
+                    //assert!(*graph.node_at(edge.0).get_level() != u16::MAX);
+                    //assert!(*graph.node_at(id).get_level() != u16::MAX);
+                    if unsafe { self.distances.get_unchecked(edge.0 as usize) }.is_none_or(|curr| weight + edge.1 < curr) && 
+                       graph.node_at(edge.0).level > graph.node_at(id).level {
                         self.distances[edge.0 as usize] = Some(weight + edge.1);
                         self.heap.push(Distance::new(weight + edge.1, edge.0));
                         self.visited.push(edge.0);
@@ -110,34 +117,31 @@ impl CH {
                 if self.incoming_optimized[id as usize / 64] & (1 << (id % 64)) != 0 {
                     continue;
                 }
-    
-                self.incoming_optimized[id as usize / 64] |= 1 << (id % 64);
 
                 // Stall-on-demand
                 if stall_on_demand && self.should_stall_backward(id) {
                     continue;
                 }
 
+                // Other dijkstra also reached this node
+                if self.optimized[id as usize / 64] & (1 << (id % 64)) != 0 {
+                    let new_dist = weight + unsafe { self.distances.get_unchecked(id as usize).unwrap() };
+                    distance = Some(distance.map_or(new_dist, |dist| dist.min(new_dist)));
+                }
+    
+                self.incoming_optimized[id as usize / 64] |= 1 << (id % 64);
+
+
                 for edge in graph.incoming_edges(id).rev() {
-                    assert!(*graph.node_at(edge.0).get_level() != u16::MAX);
-                    assert!(*graph.node_at(id).get_level() != u16::MAX);
-                    if self.incoming_distances[edge.0 as usize].is_none_or(|curr| weight + edge.1 < curr) && 
-                       graph.node_at(edge.0).get_level() > graph.node_at(id).get_level() {
+                    //assert!(*graph.node_at(edge.0).get_level() != u16::MAX);
+                    //assert!(*graph.node_at(id).get_level() != u16::MAX);
+                    if unsafe { self.incoming_distances.get_unchecked(edge.0 as usize) }.is_none_or(|curr| weight + edge.1 < curr) && 
+                       graph.node_at(edge.0).level > graph.node_at(id).level {
                         self.incoming_distances[edge.0 as usize] = Some(weight + edge.1);
                         self.incoming_heap.push(Distance::new(weight + edge.1, edge.0));
                         self.visited.push(edge.0);
                     }
                 }
-            }
-        }
-
-        // Get minimal connecting node
-        let mut distance: Option<u32> = None;
-        for v in &self.visited {
-            match (distance, self.distances[*v as usize], self.incoming_distances[*v as usize]) {
-                (None, Some(d0), Some(d1)) => distance = Some(d0 + d1),
-                (Some(d), Some(d0), Some(d1)) if d0 + d1 < d => distance = Some(d0 + d1),
-                _ => continue
             }
         }
 
@@ -322,14 +326,14 @@ impl CH {
 
     fn should_stall_forward(&self, node: NodeId) -> bool {
         let graph = self.graph.read().unwrap();
-        let node_level = graph.node_at(node).get_level();
+        let node_level = graph.node_at(node).level;
         let node_dist = match self.distances[node as usize] {
             Some(d) => d,
             None => return false,
         };
 
         for edge in graph.incoming_edges(node) {
-            let neighbor_level = graph.node_at(edge.0).get_level();
+            let neighbor_level = graph.node_at(edge.0).level;
 
             // Only consider neighbors with higher level
             if neighbor_level > node_level {
@@ -345,14 +349,14 @@ impl CH {
 
     fn should_stall_backward(&self, node: NodeId) -> bool {
         let graph = self.graph.read().unwrap();
-        let node_level = graph.node_at(node).get_level();
+        let node_level = graph.node_at(node).level;
         let node_dist = match self.incoming_distances[node as usize] {
             Some(d) => d,
             None => return false,
         };
 
         for edge in graph.outgoing_edges(node) {
-            let neighbor_level = graph.node_at(edge.0).get_level();
+            let neighbor_level = graph.node_at(edge.0).level;
 
             if neighbor_level > node_level {
                 if let Some(alt_dist) = self.incoming_distances[edge.0 as usize] {

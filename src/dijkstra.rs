@@ -1,17 +1,16 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::collections::{HashSet, HashMap};
 
-use crate::graph::Graph;
+use crate::graph::{Graph, NodeId};
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct Distance {
-    pub weight: u64,
-    pub id: usize,
+    pub weight: u32,
+    pub id: NodeId,
 }
 
 impl Distance {
-    pub fn new(weight: u64, id: usize) -> Self {
+    pub fn new(weight: u32, id: NodeId) -> Self {
         Distance { weight, id }
     }
 }
@@ -32,11 +31,11 @@ impl PartialOrd for Distance {
 
 pub struct Dijkstra<'a> {
     graph: &'a Graph,
-    weights: Vec<Option<u64>>,
+    weights: Vec<Option<u32>>,
     heap: BinaryHeap<Distance>,
-    visited: Vec<usize>,
+    visited: Vec<NodeId>,
 
-    old_start: Option<usize>,
+    old_start: Option<NodeId>,
     optimized: Vec<u64>,
 }
 
@@ -85,25 +84,25 @@ impl<'a> Dijkstra<'a> {
     //    None
     //}
 
-    pub fn shortest_path_consider_contraction(&mut self, s: usize, t: usize, contracted: &[u64]) -> Option<u64> {
+    pub fn shortest_path_consider_contraction(&mut self, s: NodeId, t: NodeId, contracted: &[u64]) -> Option<u32> {
         if let Some(weight) = self.reset(s, t) {
             return Some(weight);
         }
         
         while let Some(Distance { weight, id }) = self.heap.pop() {
-            if self.optimized[id / 64] & (1 << (id % 64)) != 0 {
+            if self.optimized[id as usize / 64] & (1 << (id % 64)) != 0 {
                 continue;
             }
 
-            self.optimized[id / 64] |= 1 << (id % 64);
+            self.optimized[id as usize / 64] |= 1 << (id % 64);
 
             for edge in self.graph.outgoing_edges(id).rev() {
-                if contracted[edge.0 / 64] & (1 << (edge.0 % 64)) != 0 {
+                if contracted[edge.0 as usize / 64] & (1 << (edge.0 % 64)) != 0 {
                     continue;
                 }
 
-                if self.weights[edge.0].is_none_or(|curr| weight + edge.1 < curr) {
-                    self.weights[edge.0] = Some(weight + edge.1);
+                if self.weights[edge.0 as usize].is_none_or(|curr| weight + edge.1 < curr) {
+                    self.weights[edge.0 as usize] = Some(weight + edge.1);
                     self.heap.push(Distance::new(weight + edge.1, edge.0));
                     self.visited.push(edge.0);
                 }
@@ -117,63 +116,14 @@ impl<'a> Dijkstra<'a> {
         None
     }
 
-    // pub fn _shortest_path_consider_contraction(&mut self, s: usize, ts: &[usize], contracted: &[u64]) -> HashMap<usize, u64> {
-    //     let target_set: HashSet<usize> = ts.iter().cloned().collect();
-    //     let mut found: HashMap<usize, u64> = HashMap::new();
-    //     let mut optimized = vec![0u64; self.graph.num_nodes().div_ceil(64)];
-    // 
-    //     // Cleanup of previous run
-    //     while let Some(node) = self.visited.pop() {
-    //         self.weights[node] = None;
-    //     }
-    //     self.heap.clear();
-    // 
-    //     // Push start to heap and set dist to 0
-    //     self.heap.push(Distance::new(0, s));
-    //     self.weights[s] = Some(0);
-    //     self.visited.push(s);
-    // 
-    //     while let Some(Distance { weight, id }) = self.heap.pop() {
-    //         // Skip already optimized nodes
-    //         if optimized[id / 64] & (1 << (id % 64)) != 0 {
-    //             continue;
-    //         }
-    // 
-    //         // Mark as optimized
-    //         optimized[id / 64] |= 1 << (id % 64);
-    // 
-    //         if target_set.contains(&id) && !found.contains_key(&id) {
-    //             found.insert(id, weight);
-    // 
-    //             if found.len() == target_set.len() {
-    //                 return found;
-    //             }
-    //         }
-    // 
-    //         for edge in self.graph.outgoing_edges(id) {
-    //             if contracted[edge.0 / 64] & (1 << (edge.0 % 64)) != 0 {
-    //                 continue;
-    //             }
-    // 
-    //             if self.weights[edge.0].is_none_or(|curr| weight + edge.1 < curr) {
-    //                 self.weights[edge.0] = Some(weight + edge.1);
-    //                 self.heap.push(Distance::new(weight + edge.1, edge.0));
-    //                 self.visited.push(edge.0);
-    //             }
-    //         }
-    //     }
-    // 
-    //     found
-    // }
-
-    fn reset(&mut self, s: usize, t: usize) -> Option<u64> {
+    fn reset(&mut self, s: NodeId, t: NodeId) -> Option<u32> {
         let mut reset = true;
 
         if let Some(old_start) = self.old_start {
             if old_start == s {
                 reset = false;
-                if self.optimized[t / 64] & (1 << (t % 64)) != 0 {
-                    return self.weights[t];
+                if self.optimized[t as usize / 64] & (1 << (t % 64)) != 0 {
+                    return self.weights[t as usize];
                 }
             }
         }
@@ -183,35 +133,35 @@ impl<'a> Dijkstra<'a> {
         // Cleanup of previous run
         if reset {
             while let Some(node) = self.visited.pop() {
-                self.weights[node] = None;
-                self.optimized[node / 64] &= !(1 << (node % 64));
+                self.weights[node as usize] = None;
+                self.optimized[node as usize / 64] &= !(1 << (node % 64));
             }
             self.heap.clear();
     
             // Push start to heap and set dist to 0
             self.heap.push(Distance::new(0, s));
-            self.weights[s] = Some(0);
+            self.weights[s as usize] = Some(0);
             self.visited.push(s);
         }
 
         return None;
     }
 
-    pub fn shortest_path(&mut self, s: usize, t: usize) -> Option<u64> {
+    pub fn shortest_path(&mut self, s: NodeId, t: NodeId) -> Option<u32> {
         if let Some(weight) = self.reset(s, t) {
             return Some(weight);
         }
 
         while let Some(Distance { weight, id }) = self.heap.pop() {
-            if self.optimized[id / 64] & (1 << (id % 64)) != 0 {
+            if self.optimized[id as usize / 64] & (1 << (id % 64)) != 0 {
                 continue;
             }
 
-            self.optimized[id / 64] |= 1 << (id % 64);
+            self.optimized[id as usize / 64] |= 1 << (id % 64);
 
             for edge in self.graph.outgoing_edges(id) {
-                if self.weights[edge.0].is_none_or(|curr| weight + edge.1 < curr) {
-                    self.weights[edge.0] = Some(weight + edge.1);
+                if self.weights[edge.0 as usize].is_none_or(|curr| weight + edge.1 < curr) {
+                    self.weights[edge.0 as usize] = Some(weight + edge.1);
                     self.heap.push(Distance::new(weight + edge.1, edge.0));
                     self.visited.push(edge.0);
                 }

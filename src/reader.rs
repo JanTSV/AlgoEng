@@ -2,7 +2,9 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::error::Error;
 
-pub fn parse_queries(filename: &str) -> Result<Vec<(usize, usize)>, Box<dyn Error>> {
+use crate::graph::NodeId;
+
+pub fn parse_queries(filename: &str) -> Result<Vec<(NodeId, NodeId)>, Box<dyn Error>> {
     let file = File::open(filename)?;
     let reader = BufReader::new(file);
 
@@ -17,8 +19,8 @@ pub fn parse_queries(filename: &str) -> Result<Vec<(usize, usize)>, Box<dyn Erro
                 return None;
             }
 
-            let source: usize = parts[0].parse().ok()?;
-            let target: usize = parts[1].parse().ok()?;
+            let source: NodeId = parts[0].parse().ok()?;
+            let target: NodeId = parts[1].parse().ok()?;
 
             Some((source, target))
         })
@@ -27,13 +29,13 @@ pub fn parse_queries(filename: &str) -> Result<Vec<(usize, usize)>, Box<dyn Erro
 
 #[cfg(test)]
 mod reader_tests {
-    use super::parse_queries;
+    use super::*;
 
     #[test]
     fn test_parse_querries() {
         let queries = parse_queries("inputs/querries.txt").unwrap();
 
-        const EXPECTED: [(usize, usize); 40] = [
+        const EXPECTED: [(NodeId, NodeId); 40] = [
             (214733, 429466),
             (214733, 429467),
             (214733, 429468),

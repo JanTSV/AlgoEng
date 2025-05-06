@@ -35,7 +35,6 @@ fn main() {
     let graph = Graph::from_file(GRAPH).unwrap();
     let duration = start.elapsed();
     writeln!(log, "Loaded graph in {:.2?}", duration).unwrap();
-    return ();
 
     // Preprocessing
     let mut ch = CH::new(graph);

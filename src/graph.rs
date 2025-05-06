@@ -9,13 +9,12 @@ pub struct Node {
     osm_id: u64,
     lat: f32,
     lon: f32,
-    height: u32,
-    level: u16,
+    level: u16
 }
 
 impl Node {
-    pub fn new(osm_id: u64, lat: f32, lon: f32, height: u32, level: u16) -> Self {
-        Node { osm_id, lat, lon, height, level }
+    pub fn new(osm_id: u64, lat: f32, lon: f32, level: u16) -> Self {
+        Node { osm_id, lat, lon, level }
     }
 
     pub fn get_level(&self) -> &u16 {
@@ -28,17 +27,17 @@ impl Node {
 
     pub fn from_str(s: &str) -> Result<Self, Box<dyn Error>> {
         let mut split = s.trim().split(' ');
-        let _id = split.next().expect("Error (node): ID.");
+        let _id = split.next();
         let osm_id: u64 = split.next().expect("Error (node): OSM ID.").parse()?;
         let lat: f32 = split.next().expect("Error (node): Lat.").parse()?;
         let lon: f32 = split.next().expect("Error (node): Lon.").parse()?;
-        let height: u32 = split.next().expect("Error (node): Height.").parse()?;
+        let _height = split.next();
         let level: u16 = split
             .next()
             .and_then(|x| x.parse::<u16>().ok())
             .unwrap_or(u16::MAX);
 
-        Ok(Self::new(osm_id, lat, lon, height, level))
+        Ok(Self::new(osm_id, lat, lon, level))
     }
 }
 
@@ -46,16 +45,16 @@ impl Node {
 pub struct Edge {
     target: NodeId,
     weight: u32,
-    typ: u32,
     max_speed: i32,
-    edge_id_a: Option<usize>,
-    edge_id_b: Option<usize>,
+    edge_id_a: u32,
+    edge_id_b: u32,
     dir: bool,
+    typ: u8,
 }
 
 impl Edge {
-    pub fn new(target: NodeId, weight: u32, typ: u32, max_speed: i32, edge_id_a: Option<usize>, edge_id_b: Option<usize>) -> Self {
-        Edge { target, weight, typ, max_speed, edge_id_a, edge_id_b, dir: true }
+    pub fn new(target: NodeId, weight: u32, typ: u8, max_speed: i32, edge_id_a: u32, edge_id_b: u32) -> Self {
+        Edge { target, weight, max_speed, edge_id_a, edge_id_b, dir: true, typ }
     }
 
     pub fn reverse(&self, source: NodeId) -> (NodeId, Self) {
@@ -71,14 +70,16 @@ impl Edge {
         let source: NodeId = split.next().expect("Error (edge): Source.").parse()?;
         let target: NodeId = split.next().expect("Error (edge): Target.").parse()?;
         let weight: u32 = split.next().expect("Error (edge): Weight.").parse()?;
-        let typ: u32 = split.next().expect("Error (edge): Type.").parse()?;
+        let typ: u8 = split.next().expect("Error (edge): Type.").parse()?;
         let max_speed: i32 = split.next().expect("Error (edge): Max speed.").parse()?;
-        let edge_id_a: Option<usize> = split
+        let edge_id_a: u32 = split
             .next()
-            .and_then(|x| x.parse::<usize>().ok());
-        let edge_id_b: Option<usize> = split
+            .and_then(|x| x.parse::<u32>().ok())
+            .unwrap_or(u32::MAX);
+        let edge_id_b: u32 = split
             .next()
-            .and_then(|x| x.parse::<usize>().ok());
+            .and_then(|x| x.parse::<u32>().ok())
+            .unwrap_or(u32::MAX);
 
         Ok((source, Self::new(target, weight, typ, max_speed, edge_id_a, edge_id_b)))
     }
@@ -137,6 +138,8 @@ impl Graph {
             edges[source as usize].push(edge);
             edges[rev_source as usize].push(rev_edge);
         }
+
+        // nodes.shrink_to_fit();
 
         Ok(Self::new(nodes, edges))
     }

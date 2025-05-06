@@ -10,12 +10,12 @@ struct Shortcut {
     from: NodeId,
     to: NodeId,
     weight: u32,
-    edge_id_a: usize,
-    edge_id_b: usize,
+    edge_id_a: u32,
+    edge_id_b: u32,
 }
 
 impl Shortcut {
-    pub fn new(from: NodeId, to: NodeId, weight: u32, edge_id_a: usize, edge_id_b: usize) -> Self {
+    pub fn new(from: NodeId, to: NodeId, weight: u32, edge_id_a: u32, edge_id_b: u32) -> Self {
         Shortcut { from, to, weight, edge_id_a, edge_id_b }
     }
 }
@@ -162,7 +162,7 @@ impl CH {
                 let direct_distance = pred_weight + succ_weight;
                 let shortest_distance = dijkstra.shortest_path_consider_contraction(pred_id, succ_id, contracted).expect("this should never happen");
                 if shortest_distance >= direct_distance {
-                    shortcuts.push(Shortcut::new(pred_id, succ_id, direct_distance, edge_id_a, edge_id_b));
+                    shortcuts.push(Shortcut::new(pred_id, succ_id, direct_distance, edge_id_a as u32, edge_id_b as u32));
                 }
             }
         }
@@ -202,7 +202,7 @@ impl CH {
                             .expect("this should never happen");
 
                         if shortest_distance >= direct_distance {
-                            local_shortcuts.push(Shortcut::new(*pred_id, succ_id, direct_distance, edge_id_a, *edge_id_b));
+                            local_shortcuts.push(Shortcut::new(*pred_id, succ_id, direct_distance, edge_id_a as u32, *edge_id_b as u32));
                         }
                     }
                 }
@@ -258,7 +258,7 @@ impl CH {
         // Add shortcuts
         for (node, shortcuts) in results {
             for Shortcut { from, to, weight, edge_id_a, edge_id_b } in shortcuts {
-                self.graph.add_edge(from, Edge::new(to, weight, 0, -1, Some(edge_id_a), Some(edge_id_b)));
+                self.graph.add_edge(from, Edge::new(to, weight, 0, -1, edge_id_a, edge_id_b));
                 num_created += 1;
             }
     

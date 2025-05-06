@@ -11,9 +11,9 @@ fn main() {
     // Inputs
     const GRAPH: &str = "inputs/germany.fmi";
     const QUERRIES: &str = "inputs/querries_germany.txt";
-    const OUTPUT: &str = "graph.ch";
 
     // Outputs
+    const OUTPUT: &str = "graph.ch";
     const LOG: &str = "log.txt";
     const RESULT: &str = "results.txt";
 
@@ -37,29 +37,29 @@ fn main() {
     writeln!(log, "Loaded graph in {:.2?}", duration).unwrap();
 
     // Preprocessing
+    writeln!(log, "#original edges: {}", graph.num_edges()).unwrap();
     let mut ch = CH::new(graph);
-    writeln!(log, "#original edges: {}", ch.get_graph().num_edges()).unwrap();
 
     let start = Instant::now();
     writeln!(log, "Started CH preprocessing...").unwrap();
     let num_shortcuts = ch.batch_preprocess();
     let duration = start.elapsed();
     writeln!(log, "Preprocessed in {:.2?}", duration).unwrap();
-    writeln!(log, "#created edges {}, #edges in new graph: {}", num_shortcuts, ch.get_graph().num_edges()).unwrap();
+    writeln!(log, "#created edges {}", num_shortcuts).unwrap();
 
     // Print out the graph
     let start = Instant::now();
     writeln!(log, "Writing graph to file...").unwrap();
-    // ch.get_graph().to_file(OUTPUT, GRAPH).unwrap();
+    //TODO: ch.write_graph(OUTPUT).unwrap();
     let duration = start.elapsed();
     writeln!(log, "Written in {:.2?}", duration).unwrap();
 
     // Querry
     for (s, t) in reader::parse_queries(QUERRIES).expect("No querries") {
         let start = Instant::now();
-        let dijkstra_found = ch.shortest_path(s, t, true);
+        let shortest_dist = ch.shortest_path(s, t, true);
         let duration = start.elapsed().as_micros();
-        match dijkstra_found {
+        match shortest_dist {
             Some(dist) => writeln!(result, "{} {} {} {}", s, t, dist, duration).unwrap(),
             None => writeln!(result, "{} {} INF {}", s, t, duration).unwrap()
         }

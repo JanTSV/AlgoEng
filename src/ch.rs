@@ -1,27 +1,29 @@
 use std::collections::BinaryHeap;
+use std::error::Error;
 use std::time::Instant;
+use std::sync::{Arc, RwLock};
 
 use rayon::prelude::*;
 
-use crate::graph::{Graph, NodeId, Node, Edge};
+use crate::graph::{Graph, NodeId, Edge};
 use crate::dijkstra::{Distance, Dijkstra};
 
 struct Shortcut {
     from: NodeId,
     to: NodeId,
     weight: u32,
-    edge_id_a: u32,
-    edge_id_b: u32,
+    edge_id_a: i32,
+    edge_id_b: i32,
 }
 
 impl Shortcut {
-    pub fn new(from: NodeId, to: NodeId, weight: u32, edge_id_a: u32, edge_id_b: u32) -> Self {
+    pub fn new(from: NodeId, to: NodeId, weight: u32, edge_id_a: i32, edge_id_b: i32) -> Self {
         Shortcut { from, to, weight, edge_id_a, edge_id_b }
     }
 }
 
 pub struct CH {
-    graph: Graph,
+    graph: Arc<RwLock<Graph>>,
 
     // s -> t
     distances: Vec<Option<u32>>,
@@ -39,7 +41,7 @@ pub struct CH {
 impl CH {
     pub fn new(graph: Graph) -> Self {
         let n = graph.num_nodes();
-        CH { graph, 
+        CH { graph: Arc::new(RwLock::new(graph)), 
              distances: vec![None; n], 
              heap: BinaryHeap::new(), 
              visited: Vec::new(),
@@ -50,8 +52,9 @@ impl CH {
         }
     }
 
-    pub fn get_graph(&self) -> &Graph {
-        &self.graph
+    pub fn write_graph(&self, filename: &str) -> Result<(), Box<dyn Error>>  {
+        let graph = self.graph.write().unwrap();
+        graph.to_file(filename)
     }
 
     pub fn shortest_path(&mut self, s: NodeId, t: NodeId, stall_on_demand: bool) -> Option<u32> {
@@ -62,6 +65,7 @@ impl CH {
             self.optimized[node as usize / 64] &= !(1 << (node % 64));
             self.incoming_optimized[node as usize / 64] &= !(1 << (node % 64));
         }
+        let graph = self.graph.read().unwrap();
 
         self.heap.clear();
         self.incoming_heap.clear();
@@ -89,11 +93,11 @@ impl CH {
                     continue;
                 }
 
-                for edge in self.graph.outgoing_edges(id).rev() {
-                    assert!(*self.graph.node_at(edge.0).get_level() != u16::MAX);
-                    assert!(*self.graph.node_at(id).get_level() != u16::MAX);
+                for edge in graph.outgoing_edges(id).rev() {
+                    assert!(*graph.node_at(edge.0).get_level() != u16::MAX);
+                    assert!(*graph.node_at(id).get_level() != u16::MAX);
                     if self.distances[edge.0 as usize].is_none_or(|curr| weight + edge.1 < curr) && 
-                       self.graph.node_at(edge.0).get_level() > self.graph.node_at(id).get_level() {
+                       graph.node_at(edge.0).get_level() > graph.node_at(id).get_level() {
                         self.distances[edge.0 as usize] = Some(weight + edge.1);
                         self.heap.push(Distance::new(weight + edge.1, edge.0));
                         self.visited.push(edge.0);
@@ -114,11 +118,11 @@ impl CH {
                     continue;
                 }
 
-                for edge in self.graph.incoming_edges(id).rev() {
-                    assert!(*self.graph.node_at(edge.0).get_level() != u16::MAX);
-                    assert!(*self.graph.node_at(id).get_level() != u16::MAX);
+                for edge in graph.incoming_edges(id).rev() {
+                    assert!(*graph.node_at(edge.0).get_level() != u16::MAX);
+                    assert!(*graph.node_at(id).get_level() != u16::MAX);
                     if self.incoming_distances[edge.0 as usize].is_none_or(|curr| weight + edge.1 < curr) && 
-                       self.graph.node_at(edge.0).get_level() > self.graph.node_at(id).get_level() {
+                       graph.node_at(edge.0).get_level() > graph.node_at(id).get_level() {
                         self.incoming_distances[edge.0 as usize] = Some(weight + edge.1);
                         self.incoming_heap.push(Distance::new(weight + edge.1, edge.0));
                         self.visited.push(edge.0);
@@ -143,20 +147,17 @@ impl CH {
     fn calc_shortcuts(&self, dijkstra: &mut Dijkstra, node: NodeId, contracted: &[u64]) -> Vec<Shortcut> {
         // (from, to, weight, edge_id_a, edge_id_b)
         let mut shortcuts: Vec<Shortcut> = Vec::new();
+        let graph = self.graph.read().unwrap();
 
-        for (edge_id_b, (pred_id, pred_weight)) in self
-            .graph
-            .incoming_edges(node)
-            .enumerate() {
+        for (pred_id, pred_weight, edge_id_b) in graph
+            .incoming_edges_with_id(node) {
 
             if contracted[pred_id as usize / 64] & (1 << (pred_id % 64)) != 0 {
                 continue;
             }
 
-            for (edge_id_a, (succ_id, succ_weight)) in self
-                .graph
-                .outgoing_edges(node)
-                .enumerate() {
+            for (succ_id, succ_weight, edge_id_a) in graph
+                .outgoing_edges_with_id(node) {
                     
                 if contracted[succ_id as usize / 64] & (1 << (succ_id % 64)) != 0 {
                     continue;
@@ -165,7 +166,7 @@ impl CH {
                 let direct_distance = pred_weight + succ_weight;
                 let shortest_distance = dijkstra.shortest_path_consider_contraction(pred_id, succ_id, contracted).expect("this should never happen");
                 if shortest_distance >= direct_distance {
-                    shortcuts.push(Shortcut::new(pred_id, succ_id, direct_distance, edge_id_a as u32, edge_id_b as u32));
+                    shortcuts.push(Shortcut::new(pred_id, succ_id, direct_distance, edge_id_a, edge_id_b));
                 }
             }
         }
@@ -174,10 +175,10 @@ impl CH {
     }
 
     fn calc_shortcuts_parallel(&self, node: NodeId, contracted: &[u64]) -> Vec<Shortcut> {
-        let incoming_edges: Vec<_> = self
-            .graph
-            .incoming_edges(node)
-            .enumerate()
+        let graph = self.graph.read().unwrap();
+
+        let incoming_edges: Vec<_> = graph
+            .incoming_edges_with_id(node)
             .collect();
 
         let chunk_size = incoming_edges.len().div_ceil(rayon::current_num_threads());
@@ -185,16 +186,17 @@ impl CH {
         incoming_edges
             .par_chunks(chunk_size)
             .flat_map(|chunk| {
-                let mut dijkstra = Dijkstra::new(&self.graph);
+                let graph = self.graph.read().unwrap();
+                let mut dijkstra = Dijkstra::new(&graph);
 
                 let mut local_shortcuts = Vec::new();
 
-                for (edge_id_b, (pred_id, pred_weight)) in chunk {
+                for (pred_id, pred_weight, edge_id_b) in chunk {
                     if contracted[*pred_id as usize / 64] & (1 << (pred_id % 64)) != 0 {
                         continue;
                     }
 
-                    for (edge_id_a, (succ_id, succ_weight)) in self.graph.outgoing_edges(node).enumerate() {
+                    for (succ_id, succ_weight, edge_id_a) in graph.outgoing_edges_with_id(node) {
                         if contracted[succ_id as usize / 64] & (1 << (succ_id % 64)) != 0 {
                             continue;
                         }
@@ -205,7 +207,7 @@ impl CH {
                             .expect("this should never happen");
 
                         if shortest_distance >= direct_distance {
-                            local_shortcuts.push(Shortcut::new(*pred_id, succ_id, direct_distance, edge_id_a as u32, *edge_id_b as u32));
+                            local_shortcuts.push(Shortcut::new(*pred_id, succ_id, direct_distance, edge_id_a, *edge_id_b));
                         }
                     }
                 }
@@ -224,16 +226,16 @@ impl CH {
         // Compute shortcuts for part of independent set with low edge diff
         //let n = indep_set.len().div_ceil(4);
         let n = match indep_set.iter().rposition(|x| x.0 <= 0) {
-            Some(idx) => idx + 1,
-            None => indep_set.len().div_ceil(10),
+            Some(idx) => idx.max(1),
+            None => indep_set.len().div_ceil(6),
         };
         let sub_indep_set = &indep_set[..n];
 
-        //println!("contract_indep_set, n: {}", n);
+       // println!("contract_indep_set, n: {}", n);
     
         let results: Vec<(NodeId, Vec<Shortcut>)> = if n < rayon::current_num_threads() / 4 {
             sub_indep_set
-                .into_par_iter()
+                .iter()
                 .map(|&(_, node)| {
                     // let mut dijkstra = Dijkstra::new(&self.graph);
                     //let shortcuts = self.calc_shortcuts(&mut dijkstra, node, contracted);
@@ -241,31 +243,31 @@ impl CH {
                     (node, shortcuts)
                 })
                 .collect()
-        } else {
-            let chunk_size = n.div_ceil(rayon::current_num_threads());
-            sub_indep_set
-                .par_chunks(chunk_size)
-                .flat_map(|chunk| {
-                    let mut dijkstra = Dijkstra::new(&self.graph);
-                    chunk.iter().map(|&(_, node)| {
-                        let shortcuts = self.calc_shortcuts(&mut dijkstra, node, contracted);
-                        (node, shortcuts)
-                    }).collect::<Vec<_>>()
-                })
-                .collect()
+            } else {
+                let chunk_size = n.div_ceil(rayon::current_num_threads());
+                sub_indep_set
+                    .par_chunks(chunk_size)
+                    .flat_map(|chunk| {
+                        let graph = self.graph.read().unwrap();
+                        let mut dijkstra = Dijkstra::new(&graph);
+                        chunk.iter().map(|&(_, node)| {
+                            let shortcuts = self.calc_shortcuts(&mut dijkstra, node, contracted);
+                            (node, shortcuts)
+                        }).collect::<Vec<_>>()
+                    })
+                    .collect()
         };
     
         let mut num_created = 0;
         let num_contracted = results.len();
-    
-        // Add shortcuts
+        let mut graph = self.graph.write().unwrap();
         for (node, shortcuts) in results {
             for Shortcut { from, to, weight, edge_id_a, edge_id_b } in shortcuts {
-                self.graph.add_edge(from, Edge::new(to, weight, 0, -1, edge_id_a, edge_id_b));
+                graph.add_edge(from, Edge::new(to, weight, 0, -1, edge_id_a, edge_id_b));
                 num_created += 1;
             }
     
-            self.graph.node_at_mut(node).set_level(level);
+            graph.node_at_mut(node).set_level(level);
             contracted[node as usize / 64] |= 1 << (node % 64);
 
         }
@@ -282,10 +284,16 @@ impl CH {
 
     pub fn batch_preprocess(&mut self) -> usize {
         let mut level = 0;
-        let mut contracted = vec![0u64; self.graph.num_nodes().div_ceil(64)];
+        let mut contracted = {
+            let graph = self.graph.read().unwrap();
+            vec![0u64; graph.num_nodes().div_ceil(64)]
+        };
         let mut all_num_shortcuts = 0;
         let mut _all_num_contracted = 0;
-        let mut nodes: Vec<NodeId> = (0..self.graph.num_nodes() as u32).collect();
+        let mut nodes: Vec<NodeId> = {
+            let graph = self.graph.read().unwrap();
+            (0..graph.num_nodes() as u32).collect()
+        };
     
         loop {
             // Find independent set
@@ -303,7 +311,7 @@ impl CH {
             all_num_shortcuts += num_created;
             _all_num_contracted += num_contracted;
             
-            //println!("Created {} / Contracted {} at level {}", all_num_shortcuts, all_num_contracted, level);
+            println!("Created {} / Contracted {} at level {}", all_num_shortcuts, _all_num_contracted, level);
 
             // Increase level for next independent set
             level += 1;
@@ -313,14 +321,15 @@ impl CH {
     }
 
     fn should_stall_forward(&self, node: NodeId) -> bool {
-        let node_level = self.graph.node_at(node).get_level();
+        let graph = self.graph.read().unwrap();
+        let node_level = graph.node_at(node).get_level();
         let node_dist = match self.distances[node as usize] {
             Some(d) => d,
             None => return false,
         };
 
-        for edge in self.graph.incoming_edges(node) {
-            let neighbor_level = self.graph.node_at(edge.0).get_level();
+        for edge in graph.incoming_edges(node) {
+            let neighbor_level = graph.node_at(edge.0).get_level();
 
             // Only consider neighbors with higher level
             if neighbor_level > node_level {
@@ -335,14 +344,15 @@ impl CH {
     }
 
     fn should_stall_backward(&self, node: NodeId) -> bool {
-        let node_level = self.graph.node_at(node).get_level();
+        let graph = self.graph.read().unwrap();
+        let node_level = graph.node_at(node).get_level();
         let node_dist = match self.incoming_distances[node as usize] {
             Some(d) => d,
             None => return false,
         };
 
-        for edge in self.graph.outgoing_edges(node) {
-            let neighbor_level = self.graph.node_at(edge.0).get_level();
+        for edge in graph.outgoing_edges(node) {
+            let neighbor_level = graph.node_at(edge.0).get_level();
 
             if neighbor_level > node_level {
                 if let Some(alt_dist) = self.incoming_distances[edge.0 as usize] {
@@ -357,10 +367,11 @@ impl CH {
     
     fn find_independent_set(&self, nodes: &mut Vec<NodeId>) -> Vec<(isize, NodeId)> {
         let mut independent_set: Vec<(isize, NodeId)> = Vec::new();
-        let mut blocked = vec![0u64; self.graph.num_nodes().div_ceil(64)];
+        let graph = self.graph.read().unwrap();
+        let mut blocked = vec![0u64; graph.num_nodes().div_ceil(64)];
         let mut blocked_nodes = Vec::new();
 
-        //println!("find_independent_set, #nodes: {}", nodes.len());
+        println!("find_independent_set, #nodes: {}", nodes.len());
     
         for node in nodes.iter().map(|node| *node) {
             if blocked[node as usize / 64] & (1 << (node % 64)) != 0 {
@@ -368,13 +379,13 @@ impl CH {
                 continue;
             }
 
-            let incoming_num = self.graph.incoming_edges(node).count() as isize; 
-            let outgoing_num = self.graph.outgoing_edges(node).count() as isize; 
+            let incoming_num = graph.incoming_edges(node).count() as isize; 
+            let outgoing_num = graph.outgoing_edges(node).count() as isize; 
 
             independent_set.push((incoming_num * outgoing_num - incoming_num - outgoing_num, node));
             
             // Block its neighbors from being selected
-            for (to, _) in self.graph.edges(node) {
+            for (to, _, _) in graph.edges(node) {
                 blocked[to as usize / 64] |= 1 << (to % 64);
             }
         }

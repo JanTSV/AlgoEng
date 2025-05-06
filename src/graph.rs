@@ -1,6 +1,8 @@
 use std::{fs::OpenOptions, error::Error};
 use std::io::Write;
 use std::io::{BufRead, BufReader};
+use std::sync::atomic::{Ordering, AtomicI32};
+use std::sync::OnceLock;
 
 pub type NodeId = u32;
 
@@ -41,20 +43,28 @@ impl Node {
     }
 }
 
+static EDGE_CREATION_COUNTER: OnceLock<AtomicI32> = OnceLock::new();
 #[derive(Debug, Clone)]
 pub struct Edge {
     target: NodeId,
     weight: u32,
     max_speed: i32,
-    edge_id_a: u32,
-    edge_id_b: u32,
+    edge_id_a: i32,
+    edge_id_b: i32,
+    id: i32,
     dir: bool,
     typ: u8,
 }
 
 impl Edge {
-    pub fn new(target: NodeId, weight: u32, typ: u8, max_speed: i32, edge_id_a: u32, edge_id_b: u32) -> Self {
-        Edge { target, weight, max_speed, edge_id_a, edge_id_b, dir: true, typ }
+    pub fn new(target: NodeId, weight: u32, typ: u8, max_speed: i32, edge_id_a: i32, edge_id_b: i32) -> Self {
+        let counter = EDGE_CREATION_COUNTER.get_or_init(|| AtomicI32::new(0));
+        counter.fetch_add(1, Ordering::Relaxed);
+        Edge { target, weight, max_speed, edge_id_a, edge_id_b, id: Self::get_creation_count(), dir: true, typ }
+    }
+
+    fn get_creation_count() -> i32 {
+        EDGE_CREATION_COUNTER.get().map(|c| c.load(Ordering::Relaxed)).unwrap_or(0)
     }
 
     pub fn reverse(&self, source: NodeId) -> (NodeId, Self) {
@@ -72,14 +82,14 @@ impl Edge {
         let weight: u32 = split.next().expect("Error (edge): Weight.").parse()?;
         let typ: u8 = split.next().expect("Error (edge): Type.").parse()?;
         let max_speed: i32 = split.next().expect("Error (edge): Max speed.").parse()?;
-        let edge_id_a: u32 = split
+        let edge_id_a: i32 = split
             .next()
-            .and_then(|x| x.parse::<u32>().ok())
-            .unwrap_or(u32::MAX);
-        let edge_id_b: u32 = split
+            .and_then(|x| x.parse::<i32>().ok())
+            .unwrap_or(-1);
+        let edge_id_b: i32 = split
             .next()
-            .and_then(|x| x.parse::<u32>().ok())
-            .unwrap_or(u32::MAX);
+            .and_then(|x| x.parse::<i32>().ok())
+            .unwrap_or(-1);
 
         Ok((source, Self::new(target, weight, typ, max_speed, edge_id_a, edge_id_b)))
     }
@@ -179,7 +189,6 @@ impl Graph {
             .iter()
             .filter_map(|edge| edge.dir.then_some((edge.target, edge.weight)))
     }
-
     
     pub fn incoming_edges(&self, idx: NodeId) -> impl Iterator<Item = (NodeId, u32)> + '_ + DoubleEndedIterator  {
         self.edges[idx as usize]
@@ -187,10 +196,22 @@ impl Graph {
             .filter_map(|edge| (!edge.dir).then_some((edge.target, edge.weight)))
     }
 
-    pub fn edges(&self, idx: NodeId) -> impl Iterator<Item = (NodeId, u32)> + '_ + DoubleEndedIterator {
+    pub fn outgoing_edges_with_id(&self, idx: NodeId) -> impl Iterator<Item = (NodeId, u32, i32)> + '_ + DoubleEndedIterator {
         self.edges[idx as usize]
             .iter()
-            .map(|edge| (edge.target, edge.weight))
+            .filter_map(|edge| edge.dir.then_some((edge.target, edge.weight, edge.id)))
+    }
+    
+    pub fn incoming_edges_with_id(&self, idx: NodeId) -> impl Iterator<Item = (NodeId, u32, i32)> + '_ + DoubleEndedIterator  {
+        self.edges[idx as usize]
+            .iter()
+            .filter_map(|edge| (!edge.dir).then_some((edge.target, edge.weight, edge.id)))
+    }
+
+    pub fn edges(&self, idx: NodeId) -> impl Iterator<Item = (NodeId, u32, bool)> + '_ + DoubleEndedIterator {
+        self.edges[idx as usize]
+            .iter()
+            .map(|edge| (edge.target, edge.weight, edge.dir))
     }
 
     pub fn to_file(&self, filename: &str) -> Result<(), Box<dyn Error>> {
@@ -204,6 +225,33 @@ impl Graph {
         // Comment header
         for _ in 0..9 {
             writeln!(file, "# ")?;
+        }
+
+        // One empty line
+        writeln!(file, "# ")?;
+
+        // #nodes
+        writeln!(file, "{}", self.num_nodes())?;
+
+        // #edges
+        writeln!(file, "{}", self.num_edges())?;
+
+        // nodes
+        for (i, node) in self.nodes.iter().enumerate() {
+            // <ID> <OSMID> <Lat> <Lon> <Height> <Level>
+            writeln!(file, "{} {} {} {} 0 {}", i, node.osm_id, node.lat, node.lon, node.level)?;
+        }
+
+        // edges
+        for (node, edges) in self.edges.iter().enumerate() {
+            for edge in edges {
+                if !edge.dir {
+                    continue;
+                }
+
+                // <SrcID> <TrgID> <Weight> <Type> <MaxSpeed> <EdgeIdA> <EdgeIdB>
+                writeln!(file, "{} {} {} {} {} {} {}", node, edge.target, edge.weight, edge.typ, edge.max_speed, edge.edge_id_a, edge.edge_id_b)?;
+            }
         }
 
         Ok(())

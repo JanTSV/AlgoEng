@@ -42,15 +42,15 @@ fn main() {
 
     let start = Instant::now();
     writeln!(log, "Started CH preprocessing...").unwrap();
-    let num_shortcuts = ch.batch_preprocess();
+    ch.batch_preprocess();
     let duration = start.elapsed();
     writeln!(log, "Preprocessed in {:.2?}", duration).unwrap();
-    writeln!(log, "#created edges {}", num_shortcuts).unwrap();
+    writeln!(log, "#edges after preprocessing {}", ch.get_graph().num_edges()).unwrap();
 
     // Print out the graph
     let start = Instant::now();
     writeln!(log, "Writing graph to file...").unwrap();
-    //TODO: ch.write_graph(OUTPUT).unwrap();
+    //TODO: ch.get_graph().to_file(OUTPUT).unwrap();
     let duration = start.elapsed();
     writeln!(log, "Written in {:.2?}", duration).unwrap();
 

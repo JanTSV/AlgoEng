@@ -163,9 +163,29 @@ impl Graph {
 
     pub fn add_edge(&mut self, source: NodeId, edge: Edge) {
         let (rev_source, rev_edge) = edge.reverse(source);
-        self.edges[source as usize].push(edge);
-        self.edges[rev_source as usize].push(rev_edge);
+        if let Some(e) = self.edges[source as usize].iter_mut().find(|e| e.target == edge.target && e.dir == edge.dir) {
+            if e.weight > edge.weight {
+                e.weight = edge.weight;
+            }
+        } else {
+            self.edges[source as usize].push(edge);
+        }
+
+        if let Some(e) = self.edges[rev_source as usize].iter_mut().find(|e| e.target == rev_edge.target && e.dir == rev_edge.dir) {
+            if e.weight > rev_edge.weight {
+                e.weight = rev_edge.weight;
+            }
+        } else {
+            self.edges[rev_source as usize].push(rev_edge);
+        }
     }
+
+
+    //pub fn add_edge(&mut self, source: NodeId, edge: Edge) {
+    //    let (rev_source, rev_edge) = edge.reverse(source);
+    //    self.edges[source as usize].push(edge);
+    //    self.edges[rev_source as usize].push(rev_edge);
+    //}
 
     fn new(nodes: Vec<Node>, edges: Vec<Vec<Edge>>) -> Self {
         assert_eq!(nodes.len(), edges.len());

@@ -1,7 +1,8 @@
 use std::collections::BinaryHeap;
 use std::error::Error;
+use std::ops::Div;
 use std::time::Instant;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, RwLockReadGuard};
 
 use rayon::prelude::*;
 
@@ -52,9 +53,9 @@ impl CH {
         }
     }
 
-    pub fn write_graph(&self, filename: &str) -> Result<(), Box<dyn Error>>  {
+    pub fn get_graph(&self) -> RwLockReadGuard<'_, Graph> {
         let graph = self.graph.read().unwrap();
-        graph.to_file(filename)
+        graph
     }
 
     pub fn shortest_path(&mut self, s: NodeId, t: NodeId, stall_on_demand: bool) -> Option<u32> {
@@ -225,88 +226,47 @@ impl CH {
         &mut self,
         indep_set: &Vec<(isize, NodeId)>,
         level: u16,
-        contracted: &mut [u64],
-        nodes: &mut Vec<NodeId>
-    ) -> (usize, usize) {
-        // Compute shortcuts for part of independent set with low edge diff
-        let zero_or_less = indep_set.partition_point(|x| x.1 <= 0);
-
-        let n = if zero_or_less > 0 {
-            zero_or_less.max(indep_set.len().div_ceil(16))
-        } else {
-            indep_set.len().div_ceil(8)
-        };
-
-        let sub_indep_set = &indep_set[..n];
-
-        // println!("contract_indep_set, n: {}", n);
-        
+        contracted: &mut [u64]
+    ) {
         //let start = Instant::now();
-        let results: Vec<(NodeId, Vec<Shortcut>)> = if n < rayon::current_num_threads() / 4 {
-            sub_indep_set
-                .iter()
-                .map(|&(_, node)| {
-                    // let mut dijkstra = Dijkstra::new(&self.graph);
-                    //let shortcuts = self.calc_shortcuts(&mut dijkstra, node, contracted);
-                    let shortcuts = self.calc_shortcuts_parallel(node, contracted);
+        let chunk_size = indep_set.len().div_ceil(rayon::current_num_threads());
+        let results: Vec<(NodeId, Vec<Shortcut>)> = indep_set
+            .par_chunks(chunk_size)
+            .flat_map(|chunk| {
+                let graph = self.graph.read().unwrap();
+                let mut dijkstra = Dijkstra::new(&graph);
+                chunk.iter().map(|&(_, node)| {
+                    let shortcuts = self.calc_shortcuts(&mut dijkstra, node, contracted);
                     (node, shortcuts)
-                })
-                .collect()
-            } else {
-                let chunk_size = n.div_ceil(rayon::current_num_threads());
-                sub_indep_set
-                    .par_chunks(chunk_size)
-                    .flat_map(|chunk| {
-                        let graph = self.graph.read().unwrap();
-                        let mut dijkstra = Dijkstra::new(&graph);
-                        chunk.iter().map(|&(_, node)| {
-                            let shortcuts = self.calc_shortcuts(&mut dijkstra, node, contracted);
-                            (node, shortcuts)
-                        }).collect::<Vec<_>>()
-                    })
-                    .collect()
-        };
+                }).collect::<Vec<_>>()
+            })
+            .collect();
 
         //println!("Threads: {:.2?}", start.elapsed());
     
-        let mut num_created = 0;
-        let num_contracted = results.len();
         let mut graph = self.graph.write().unwrap();
         for (node, shortcuts) in results {
             for Shortcut { from, to, weight, edge_id_a, edge_id_b } in shortcuts {
                 graph.add_edge(from, Edge::new(to, weight, 0, -1, edge_id_a, edge_id_b));
-                num_created += 1;
             }
     
             graph.node_at_mut(node).set_level(level);
             contracted[node as usize / 64] |= 1 << (node % 64);
 
         }
-
-        // Push unused nodes
-        for i in n..indep_set.len() {
-            let node = indep_set[i].1;
-            assert!((contracted[node as usize / 64]) & (1 << (node % 64)) == 0);
-            nodes.push(node);
-        }
-
-        (num_contracted, num_created)
     }
 
-    pub fn batch_preprocess(&mut self) -> usize {
-        let mut level = 0;
+    pub fn batch_preprocess(&mut self) {
         let mut contracted = {
             let graph = self.graph.read().unwrap();
             vec![0u64; graph.num_nodes().div_ceil(64)]
         };
-        let mut all_num_shortcuts = 0;
-        let mut _all_num_contracted = 0;
         let mut nodes: Vec<NodeId> = {
             let graph = self.graph.read().unwrap();
             (0..graph.num_nodes() as u32).collect()
         };
     
-        loop {
+        for level in 0.. {
             // Find independent set
             //let start = Instant::now();
             let indep_set = self.find_independent_set(&mut nodes, &contracted);
@@ -317,18 +277,11 @@ impl CH {
 
             // Contract part of independent set with low edge diff
             //let start = Instant::now();
-            let (num_contracted, num_created) = self.contract_indep_set(&indep_set, level, &mut contracted, &mut nodes);
+            self.contract_indep_set(&indep_set, level, &mut contracted);
             //println!("contract_indep_set took {:.2?}", start.elapsed());
-            all_num_shortcuts += num_created;
-            _all_num_contracted += num_contracted;
             
-            println!("Created {} / Contracted {} at level {}", all_num_shortcuts, _all_num_contracted, level);
-
-            // Increase level for next independent set
-            level += 1;
+            dbg!(level);
         }
-
-        all_num_shortcuts
     }
 
     fn should_stall_forward(&self, node: NodeId) -> bool {
@@ -382,7 +335,7 @@ impl CH {
         let mut blocked = vec![0u64; graph.num_nodes().div_ceil(64)];
         let mut blocked_nodes = Vec::new();
 
-        println!("find_independent_set, #nodes: {}", nodes.len());
+        dbg!(nodes.len());
     
         for node in nodes.iter().map(|node| *node) {
             if blocked[node as usize / 64] & (1 << (node % 64)) != 0 {
@@ -401,10 +354,29 @@ impl CH {
             }
         }
 
-        *nodes = blocked_nodes;
-
         // Sort independent set
         independent_set.sort_by_key(|x| x.0);
+
+        let zero_or_less = independent_set.partition_point(|x| x.0 <= 0);
+
+        // Only take subset with low edge diff
+        let n = if zero_or_less > 0 {
+            zero_or_less.max(independent_set.len().div_ceil(16))
+        } else {
+            independent_set.len().div_ceil(8)
+        };
+
+        dbg!(n);
+
+         for (_, node) in &independent_set[n..] {
+            blocked_nodes.push(*node);
+        }
+
+        independent_set.truncate(n);
+
+        // Save blocked nodes for next call
+        *nodes = blocked_nodes;
+
         independent_set
     }
 }

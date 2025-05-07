@@ -53,7 +53,7 @@ impl CH {
     }
 
     pub fn write_graph(&self, filename: &str) -> Result<(), Box<dyn Error>>  {
-        let graph = self.graph.write().unwrap();
+        let graph = self.graph.read().unwrap();
         graph.to_file(filename)
     }
 
@@ -179,11 +179,12 @@ impl CH {
     }
 
     fn calc_shortcuts_parallel(&self, node: NodeId, contracted: &[u64]) -> Vec<Shortcut> {
-        let graph = self.graph.read().unwrap();
-
-        let incoming_edges: Vec<_> = graph
-            .incoming_edges_with_id(node)
-            .collect();
+        let incoming_edges: Vec<_> = {
+            let graph = self.graph.read().unwrap();
+                graph
+                .incoming_edges_with_id(node)
+                .collect()
+        };
 
         let chunk_size = incoming_edges.len().div_ceil(rayon::current_num_threads());
 
@@ -228,15 +229,19 @@ impl CH {
         nodes: &mut Vec<NodeId>
     ) -> (usize, usize) {
         // Compute shortcuts for part of independent set with low edge diff
-        //let n = indep_set.len().div_ceil(4);
-        let n = match indep_set.iter().rposition(|x| x.0 <= 0) {
-            Some(idx) => idx.max(1),
-            None => indep_set.len().div_ceil(6),
+        let zero_or_less = indep_set.partition_point(|x| x.1 <= 0);
+
+        let n = if zero_or_less > 0 {
+            zero_or_less.max(indep_set.len().div_ceil(16))
+        } else {
+            indep_set.len().div_ceil(8)
         };
+
         let sub_indep_set = &indep_set[..n];
 
-       // println!("contract_indep_set, n: {}", n);
-    
+        // println!("contract_indep_set, n: {}", n);
+        
+        //let start = Instant::now();
         let results: Vec<(NodeId, Vec<Shortcut>)> = if n < rayon::current_num_threads() / 4 {
             sub_indep_set
                 .iter()
@@ -261,6 +266,8 @@ impl CH {
                     })
                     .collect()
         };
+
+        //println!("Threads: {:.2?}", start.elapsed());
     
         let mut num_created = 0;
         let num_contracted = results.len();
@@ -302,7 +309,7 @@ impl CH {
         loop {
             // Find independent set
             //let start = Instant::now();
-            let indep_set = self.find_independent_set(&mut nodes);
+            let indep_set = self.find_independent_set(&mut nodes, &contracted);
             //println!("find_independent_set took {:.2?}", start.elapsed());
             if indep_set.is_empty() {
                 break;
@@ -369,7 +376,7 @@ impl CH {
         false
     }
     
-    fn find_independent_set(&self, nodes: &mut Vec<NodeId>) -> Vec<(isize, NodeId)> {
+    fn find_independent_set(&self, nodes: &mut Vec<NodeId>, contracted: &[u64]) -> Vec<(isize, NodeId)> {
         let mut independent_set: Vec<(isize, NodeId)> = Vec::new();
         let graph = self.graph.read().unwrap();
         let mut blocked = vec![0u64; graph.num_nodes().div_ceil(64)];
@@ -383,8 +390,8 @@ impl CH {
                 continue;
             }
 
-            let incoming_num = graph.incoming_edges(node).count() as isize; 
-            let outgoing_num = graph.outgoing_edges(node).count() as isize; 
+            let incoming_num = graph.incoming_edges(node).filter(|(to, _)| (contracted[*to as usize / 64]) & (1 << (*to % 64)) == 0).count() as isize;
+            let outgoing_num = graph.outgoing_edges(node).filter(|(to, _)| (contracted[*to as usize / 64]) & (1 << (*to % 64)) == 0).count() as isize;
 
             independent_set.push((incoming_num * outgoing_num - incoming_num - outgoing_num, node));
             

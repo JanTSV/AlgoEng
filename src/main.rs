@@ -9,8 +9,8 @@ mod ch;
 
 fn main() {
     // Inputs
-    const GRAPH: &str = "inputs/germany.fmi";
-    const QUERRIES: &str = "inputs/querries_germany.txt";
+    const GRAPH: &str = "graph.fmi";
+    const QUERRIES: &str = "queries.txt";
 
     // Outputs
     const OUTPUT: &str = "graph.ch";
@@ -37,7 +37,8 @@ fn main() {
     writeln!(log, "Loaded graph in {:.2?}", duration).unwrap();
 
     // Preprocessing
-    writeln!(log, "#original edges: {}", graph.num_edges()).unwrap();
+    let original_edges = graph.num_edges();
+    writeln!(log, "#original edges: {}", original_edges).unwrap();
     let mut ch = CH::new(graph);
 
     let start = Instant::now();
@@ -45,16 +46,18 @@ fn main() {
     ch.batch_preprocess();
     let duration = start.elapsed();
     writeln!(log, "Preprocessed in {:.2?}", duration).unwrap();
-    writeln!(log, "#edges after preprocessing {}", ch.get_graph().num_edges()).unwrap();
+    let new_edges = ch.get_graph().num_edges();
+    writeln!(log, "#edges after preprocessing {} (created {})", new_edges, new_edges - original_edges).unwrap();
 
-    // Print out the graph
+    // Write graph to file
     let start = Instant::now();
     writeln!(log, "Writing graph to file...").unwrap();
-    //TODO: ch.get_graph().to_file(OUTPUT).unwrap();
+    ch.get_graph().to_file(OUTPUT).unwrap();
     let duration = start.elapsed();
     writeln!(log, "Written in {:.2?}", duration).unwrap();
 
     // Querry
+    writeln!(log, "Running queries...").unwrap();
     for (s, t) in reader::parse_queries(QUERRIES).expect("No querries") {
         let start = Instant::now();
         let shortest_dist = ch.shortest_path(s, t, true);
@@ -64,4 +67,5 @@ fn main() {
             None => writeln!(result, "{} {} INF {}", s, t, duration).unwrap()
         }
     }
+    writeln!(log, "Queries done").unwrap();
 }

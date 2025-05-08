@@ -280,7 +280,7 @@ impl CH {
             self.contract_indep_set(&indep_set, level, &mut contracted);
             //println!("contract_indep_set took {:.2?}", start.elapsed());
             
-            dbg!(level);
+            //dbg!(level);
         }
     }
 
@@ -335,7 +335,7 @@ impl CH {
         let mut blocked = vec![0u64; graph.num_nodes().div_ceil(64)];
         let mut blocked_nodes = Vec::new();
 
-        dbg!(nodes.len());
+        //dbg!(nodes.len());
     
         for node in nodes.iter().map(|node| *node) {
             if blocked[node as usize / 64] & (1 << (node % 64)) != 0 {
@@ -366,7 +366,7 @@ impl CH {
             independent_set.len().div_ceil(8)
         };
 
-        dbg!(n);
+        //dbg!(n);
 
          for (_, node) in &independent_set[n..] {
             blocked_nodes.push(*node);

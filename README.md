@@ -1,4 +1,4 @@
-# AlgEng
+# AlgEng: Assignment 2
 
 The code is written in [rust](https://www.rust-lang.org/).
 
@@ -13,10 +13,4 @@ Just like the assignment required it, simply copy the needed files into this fol
 
 ```bash
 make
-```
-
-This should hopefully call (all paths are hardcoded for now)
-
-```bash
-cargo run --release
 ```

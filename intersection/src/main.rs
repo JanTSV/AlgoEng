@@ -79,19 +79,19 @@ fn main() {
         let s = Instant::now();
         let result_native = intersect_naive(&a, &b);
         //dbg!(&result_native);
-        assert_eq!(result_native.len(), b.len());
         println!("intersect_naive() took: {:.2?}", s.elapsed());
+        assert_eq!(result_native.len(), b.len());
 
         let s = Instant::now();
         let result_binary_search = intersect_binary_search(&a, &b);
-        assert_eq!(result_native, result_binary_search);
         println!("intersect_binary_search() took: {:.2?}", s.elapsed());
+        assert_eq!(result_native, result_binary_search);
         //dbg!(&result_binary_search);
 
         let s = Instant::now();
         let result_galloping: Vec<u32> = intersect_galopping_search(&a, &b);
-        assert_eq!(result_native, result_galloping);
         println!("intersect_galopping_search() took: {:.2?}", s.elapsed());
+        assert_eq!(result_native, result_galloping);
 
     } 
 }

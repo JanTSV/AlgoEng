@@ -14,6 +14,19 @@ impl Movie {
     fn new(title: String, description: String) -> Self {
         Movie { title, description }
     }
+
+    fn iter_words(&self) -> impl Iterator<Item = String> + '_ {
+        self.description
+            .split_whitespace()
+            .map(|word| {
+                word
+                    .to_lowercase()
+                    .chars()
+                    .filter(|c| c.is_alphanumeric() || *c == '\'' || *c == '-')
+                    .collect::<String>()
+            })
+            .filter(|w| !w.is_empty())
+    }
 }
 
 fn parse(filename: &str) -> Vec<Movie> {
@@ -36,15 +49,13 @@ fn parse(filename: &str) -> Vec<Movie> {
 }
 
 fn naive<'a>(movies: &'a [Movie], query: &[String]) -> Vec<&'a Movie> {
-    let s = Instant::now();
     let mut found = Vec::new();
 
     'outer: for movie in movies {
-        let words: Vec<&str> = movie.description.split_whitespace().collect();
-
         for q in query {
-            if !words.iter().any(|&w| w == q) {
-                continue 'outer; // If one word doesn't match, skip this movie
+            if !movie.iter_words().any(|w| w == *q) {
+                // If one word doesn't match, skip this movie
+                continue 'outer;
             }
         }
 
@@ -97,7 +108,7 @@ async fn main() {
 }
 
 fn query<'a>(movies: &'a [Movie], data: FormData) -> String {
-    let query: Vec<String> = data.query.split_whitespace().map(|q| q.to_string()).collect();
+    let query: Vec<String> = data.query.split_whitespace().map(|q| q.to_string().to_lowercase()).collect();
 
     let start = Instant::now();
     let found = match data.method.as_str() {

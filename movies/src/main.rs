@@ -1,8 +1,10 @@
+use std::hash::Hash;
 use std::{env, time::Instant};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use warp::Filter;
 use std::sync::Arc;
+use std::collections::HashMap;
 
 #[derive(Debug)]
 struct Movie {
@@ -15,18 +17,20 @@ impl Movie {
         Movie { title, description }
     }
 
-    fn iter_words(&self) -> impl Iterator<Item = String> + '_ {
-        self.description
-            .split_whitespace()
-            .map(|word| {
-                word
-                    .to_lowercase()
-                    .chars()
-                    .filter(|c| c.is_alphanumeric() || *c == '\'' || *c == '-')
-                    .collect::<String>()
-            })
-            .filter(|w| !w.is_empty())
-    }
+
+}
+
+fn iter_words(s: &String) -> impl Iterator<Item = String> + '_ {
+    s
+        .split_whitespace()
+        .map(|word| {
+            word
+                .to_lowercase()
+                .chars()
+                .filter(|c| c.is_alphanumeric() || *c == '\'' || *c == '-')
+                .collect::<String>()
+        })
+        .filter(|w| !w.is_empty())
 }
 
 fn parse(filename: &str) -> Vec<Movie> {
@@ -48,19 +52,132 @@ fn parse(filename: &str) -> Vec<Movie> {
         .collect()
 }
 
-fn naive<'a>(movies: &'a [Movie], query: &[String]) -> Vec<&'a Movie> {
-    let mut found = Vec::new();
+#[derive(Clone, PartialEq, Eq)]
+struct MovieRank {
+    // TODO: Compression
+    id: usize,
+    rank: u16
+}
 
-    'outer: for movie in movies {
+impl MovieRank {
+    fn new(id: usize) -> Self {
+        MovieRank { id, rank: 1 }
+    }
+}
+
+impl PartialOrd for MovieRank {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for MovieRank {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.id.cmp(&other.id)
+    }
+}
+
+fn naive<'a>(movies: &'a [Movie], query: &[String]) -> Vec<MovieRank> {
+    let mut found = Vec::new();
+    let mut last = 0;
+
+    'outer: for (i, movie) in movies.iter().enumerate() {
+        // let offset = i - last;
         for q in query {
-            if !movie.iter_words().any(|w| w == *q) {
+            if !iter_words(&movie.description).any(|w| w == *q) {
                 // If one word doesn't match, skip this movie
                 continue 'outer;
             }
         }
 
         // All query words matched
-        found.push(movie);
+        found.push(MovieRank::new(i));
+        last = i;
+    }
+
+    found
+}
+
+fn create_inverted_index_hash_map(movies: &[Movie]) -> HashMap<String, Vec<MovieRank>> {
+    let mut hashmap: HashMap<String, Vec<MovieRank>> = HashMap::new();
+
+    // let mut last = 0;
+    for (i, movie) in movies.iter().enumerate() {
+        // let offset = i - last;
+        for word in iter_words(&movie.description) {
+            match hashmap.get_mut(&word) {
+                Some(x) =>  {
+                    match x.last_mut() {
+                        Some(y) if y.id == i => y.rank += 1,
+                        _ => {
+                            x.push(MovieRank::new(i));
+                            // last = i;
+
+                        }
+                    }
+                },
+                None => {
+                    let mut v = Vec::new();
+                    v.push(MovieRank::new(i));
+                    hashmap.insert(word, v);
+                    // last = i;
+                }
+            }
+        }
+    }
+
+    hashmap
+}
+
+fn binary_search<Item: PartialOrd + PartialEq>(v: &[Item], s: &Item, mut left: usize, mut right: usize) -> bool {
+    while left < right {
+        let mid = left + (right - left) / 2;
+        if v[mid] == *s {
+            return true;
+        } else if v[mid] < *s {
+            left = mid + 1;
+        } else {
+            right = mid;
+        }
+    }
+    false
+}
+
+fn intersect_galopping_search<Item: PartialOrd + PartialEq + Clone>(a: &[Item], b: &[Item]) -> Vec<Item> {
+    b.iter().filter_map(|be| if galloping_search(a, be) { Some(be.clone()) } else { None }).collect()
+}
+
+fn galloping_search<Item: PartialOrd + PartialEq>(v: &[Item], s: &Item) -> bool {
+    if v.is_empty() {
+        return false;
+    }
+
+    let mut bound = 1;
+
+    while bound < v.len() && v[bound] < *s {
+        bound *= 2;
+    }
+
+    binary_search(v, s, bound / 2, (bound + 1).min(v.len()))
+}
+
+fn query_hashmap(hashmap: &HashMap<String, Vec<MovieRank>>, query: &[String]) -> Vec<MovieRank> {
+    let mut found: Vec<MovieRank> = Vec::new();
+    let mut first = true;
+
+    for q in query {
+        match hashmap.get(q) {
+            Some(q_found) => {
+                match first {
+                    false => found = intersect_galopping_search(&found, &q_found),
+                    true => {
+                        found.extend(q_found.iter().cloned());
+                        first = false;
+                    }
+                }
+            },
+            None => continue
+        } 
     }
 
     found
@@ -83,6 +200,12 @@ async fn main() {
     let movies = Arc::new(parse(&args[1]));
     println!("Parsed in {:.2?}", s.elapsed());
 
+    // TODO: Create inverted index with hashmap
+    println!("Creating hashmap...");
+    let s = Instant::now();
+    let hashmap = Arc::new(create_inverted_index_hash_map(&movies));
+    println!("Created hashmap in {:.2?}", s.elapsed());
+
     // Simple HTML server
     let form = warp::path::end()
         .map(|| warp::reply::html(FORM_HTML));
@@ -93,11 +216,17 @@ async fn main() {
         move || Arc::clone(&movies)
     });
 
+    let hashmap_filter = warp::any().map({
+        let hashmap = Arc::clone(&hashmap);
+        move || Arc::clone(&hashmap)
+    });
+
     let submit = warp::path("submit")
         .and(warp::query::<FormData>())
         .and(movies_filter)
-        .map(|data: FormData, movies: Arc<Vec<Movie>>| {
-            warp::reply::html(query(&movies, data))
+        .and(hashmap_filter)
+        .map(|data: FormData, movies: Arc<Vec<Movie>>, hashmap: Arc<HashMap<String, Vec<MovieRank>>>| {
+            warp::reply::html(query(data, &movies, &hashmap))
         });
 
     let routes = form.or(submit);
@@ -107,21 +236,24 @@ async fn main() {
     warp::serve(routes).run(([127, 0, 0, 1], PORT)).await;
 }
 
-fn query<'a>(movies: &'a [Movie], data: FormData) -> String {
+fn query<'a>(data: FormData, movies: &'a [Movie], hashmap: &HashMap<String, Vec<MovieRank>>) -> String {
     let query: Vec<String> = data.query.split_whitespace().map(|q| q.to_string().to_lowercase()).collect();
 
     let start = Instant::now();
     let found = match data.method.as_str() {
         "naive" => Some(naive(movies, &query)),
+        "hashmap" => Some(query_hashmap(hashmap, &query)),
         _ => None
     };
     let duration = start.elapsed();
 
     if let Some(found) = found {
         let mut table = String::from("<table border=1><tr><th>Title</th><th>Description</th></tr>");
-
-        for movie in found {
-            table.push_str(format!("<tr><td>{}</td><td>{}</td></tr>", movie.title, movie.description).as_str())
+        // let mut i = 0;
+        for rank in found {
+            // i += rank.offset;
+            let i = rank.id;
+            table.push_str(format!("<tr><td>{}</td><td>{}</td></tr>", movies[i].title, movies[i].description).as_str())
         }
 
         table.push_str("</table>");
@@ -176,7 +308,7 @@ const FORM_HTML: &str = r#"
         <label>Option:</label><br>
         <select name="method">
             <option value="naive">naive</option>
-            <option value="option1">option1</option>
+            <option value="hashmap">hashmap</option>
             <option value="option2">option2</option>
         </select><br><br>
 

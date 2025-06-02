@@ -1,4 +1,3 @@
-use std::hash::Hash;
 use std::{env, time::Instant};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -16,8 +15,6 @@ impl Movie {
     fn new(title: String, description: String) -> Self {
         Movie { title, description }
     }
-
-
 }
 
 fn iter_words(s: &String) -> impl Iterator<Item = String> + '_ {
@@ -52,7 +49,7 @@ fn parse(filename: &str) -> Vec<Movie> {
         .collect()
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone)]
 struct MovieRank {
     // TODO: Compression
     id: usize,
@@ -65,9 +62,17 @@ impl MovieRank {
     }
 }
 
+impl PartialEq for MovieRank {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for MovieRank {}
+
 impl PartialOrd for MovieRank {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
+        Some(self.id.cmp(&other.id))
     }
 }
 

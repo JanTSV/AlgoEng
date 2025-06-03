@@ -62,26 +62,6 @@ impl MovieRank {
     }
 }
 
-impl PartialEq for MovieRank {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for MovieRank {}
-
-impl PartialOrd for MovieRank {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.id.cmp(&other.id))
-    }
-}
-
-impl Ord for MovieRank {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.id.cmp(&other.id)
-    }
-}
-
 fn naive<'a>(movies: &'a [Movie], query: &[String]) -> Vec<MovieRank> {
     let mut found = Vec::new();
     let mut last = 0;
@@ -113,7 +93,9 @@ fn create_inverted_index_hash_map(movies: &[Movie]) -> HashMap<String, Vec<Movie
             match hashmap.get_mut(&word) {
                 Some(x) =>  {
                     match x.last_mut() {
-                        Some(y) if y.id == i => y.rank += 1,
+                        Some(y) if y.id == i => {
+                            y.rank += 1;
+                        },
                         _ => {
                             x.push(MovieRank::new(i));
                             // last = i;
@@ -134,36 +116,36 @@ fn create_inverted_index_hash_map(movies: &[Movie]) -> HashMap<String, Vec<Movie
     hashmap
 }
 
-fn binary_search<Item: PartialOrd + PartialEq>(v: &[Item], s: &Item, mut left: usize, mut right: usize) -> bool {
+fn binary_search<'a>(v: &'a [MovieRank], s: &MovieRank, mut left: usize, mut right: usize) -> Option<&'a MovieRank> {
     while left < right {
         let mid = left + (right - left) / 2;
-        if v[mid] == *s {
-            return true;
-        } else if v[mid] < *s {
+        if v[mid].id == s.id {
+            return Some(&v[mid]);
+        } else if v[mid].id < s.id {
             left = mid + 1;
         } else {
             right = mid;
         }
     }
-    false
+    None
 }
 
-fn intersect_galopping_search<Item: PartialOrd + PartialEq + Clone>(a: &[Item], b: &[Item]) -> Vec<Item> {
-    b.iter().filter_map(|be| if galloping_search(a, be) { Some(be.clone()) } else { None }).collect()
-}
-
-fn galloping_search<Item: PartialOrd + PartialEq>(v: &[Item], s: &Item) -> bool {
+fn galloping_search<'a>(v: &'a [MovieRank], s: &MovieRank) -> Option<&'a MovieRank> {
     if v.is_empty() {
-        return false;
+        return None;
     }
 
     let mut bound = 1;
 
-    while bound < v.len() && v[bound] < *s {
+    while bound < v.len() && v[bound].id < s.id {
         bound *= 2;
     }
 
     binary_search(v, s, bound / 2, (bound + 1).min(v.len()))
+}
+
+fn intersect_galopping_search(a: &[MovieRank], b: &[MovieRank]) -> Vec<MovieRank> {
+    b.iter().filter_map(|bb| if let Some(aa) = galloping_search(a, bb) { Some(MovieRank{ id: aa.id, rank: aa.rank + bb.rank}) } else { None }).collect()
 }
 
 fn query_hashmap(hashmap: &HashMap<String, Vec<MovieRank>>, query: &[String]) -> Vec<MovieRank> {

@@ -53,12 +53,12 @@ fn parse(filename: &str) -> Vec<Movie> {
 struct MovieRank {
     // TODO: Compression
     id: usize,
-    rank: u16
+    relevance: f32,
 }
 
 impl MovieRank {
     fn new(id: usize) -> Self {
-        MovieRank { id, rank: 1 }
+        MovieRank { id, relevance: 1.0 }
     }
 }
 
@@ -83,8 +83,9 @@ fn naive<'a>(movies: &'a [Movie], query: &[String]) -> Vec<MovieRank> {
     found
 }
 
-fn create_inverted_index_hash_map(movies: &[Movie]) -> HashMap<String, Vec<MovieRank>> {
+fn create_inverted_index_hash_map(movies: &[Movie]) -> (HashMap<String, Vec<MovieRank>>, Vec<f32>) {
     let mut hashmap: HashMap<String, Vec<MovieRank>> = HashMap::new();
+    let mut max_tf = vec![1.0f32; movies.len()];
 
     // let mut last = 0;
     for (i, movie) in movies.iter().enumerate() {
@@ -94,7 +95,9 @@ fn create_inverted_index_hash_map(movies: &[Movie]) -> HashMap<String, Vec<Movie
                 Some(x) =>  {
                     match x.last_mut() {
                         Some(y) if y.id == i => {
-                            y.rank += 1;
+                            // First relevance just counts the number of occurences
+                            y.relevance += 1.0;
+                            max_tf[i] += 1.0;
                         },
                         _ => {
                             x.push(MovieRank::new(i));
@@ -113,7 +116,7 @@ fn create_inverted_index_hash_map(movies: &[Movie]) -> HashMap<String, Vec<Movie
         }
     }
 
-    hashmap
+    (hashmap, max_tf)
 }
 
 fn binary_search<'a>(v: &'a [MovieRank], s: &MovieRank, mut left: usize, mut right: usize) -> Option<&'a MovieRank> {
@@ -144,11 +147,17 @@ fn galloping_search<'a>(v: &'a [MovieRank], s: &MovieRank) -> Option<&'a MovieRa
     binary_search(v, s, bound / 2, (bound + 1).min(v.len()))
 }
 
-fn intersect_galopping_search(a: &[MovieRank], b: &[MovieRank]) -> Vec<MovieRank> {
-    b.iter().filter_map(|bb| if let Some(aa) = galloping_search(a, bb) { Some(MovieRank{ id: aa.id, rank: aa.rank + bb.rank}) } else { None }).collect()
+fn intersect_galopping_search(a: &[MovieRank], b: &[MovieRank], n: usize, m: usize, max_tf: &[f32]) -> Vec<MovieRank> {
+    b.iter().filter_map(|bb| if let Some(aa) = galloping_search(a, bb) { Some(MovieRank{ id: aa.id, relevance: aa.relevance + calc_relevance(n, m, bb.relevance, max_tf[aa.id])}) } else { None }).collect()
 }
 
-fn query_hashmap(hashmap: &HashMap<String, Vec<MovieRank>>, query: &[String]) -> Vec<MovieRank> {
+fn calc_relevance(n: usize, m: usize, occurences: f32, max_tf: f32) -> f32 {
+    let idf = (n as f32 / m as f32).ln();
+    let tf = occurences / max_tf;
+    idf * tf
+}
+
+fn query_hashmap(hashmap: &HashMap<String, Vec<MovieRank>>, query: &[String], max_tf: &[f32], n: usize) -> Vec<MovieRank> {
     let mut found: Vec<MovieRank> = Vec::new();
     let mut first = true;
 
@@ -156,9 +165,12 @@ fn query_hashmap(hashmap: &HashMap<String, Vec<MovieRank>>, query: &[String]) ->
         match hashmap.get(q) {
             Some(q_found) => {
                 match first {
-                    false => found = intersect_galopping_search(&found, &q_found),
+                    false => found = intersect_galopping_search(&found, &q_found, n, q_found.len(), max_tf),
                     true => {
-                        found.extend(q_found.iter().cloned());
+                        found.extend(q_found.iter().map(|x| {
+                            let relevance = calc_relevance(n, q_found.len(), x.relevance, max_tf[x.id]);
+                            MovieRank { id: x.id, relevance }
+                        }));
                         first = false;
                     }
                 }
@@ -170,71 +182,21 @@ fn query_hashmap(hashmap: &HashMap<String, Vec<MovieRank>>, query: &[String]) ->
     found
 }
 
-#[tokio::main]
-async fn main() {
-    // Read console args
-    let args: Vec<String> = env::args().collect();
-    const PORT: u16 = 8080;
-
-    if args.len() != 2 {
-        println!("Usage: ./movies <movies.txt>");
-        return;
-    }
-
-    // Parse movie file
-    println!("Parsing {}...", args[1]);
-    let s = Instant::now();
-    let movies = Arc::new(parse(&args[1]));
-    println!("Parsed in {:.2?}", s.elapsed());
-
-    // TODO: Create inverted index with hashmap
-    println!("Creating hashmap...");
-    let s = Instant::now();
-    let hashmap = Arc::new(create_inverted_index_hash_map(&movies));
-    println!("Created hashmap in {:.2?}", s.elapsed());
-
-    // Simple HTML server
-    let form = warp::path::end()
-        .map(|| warp::reply::html(FORM_HTML));
-
-    // Handle query
-    let movies_filter = warp::any().map({
-        let movies = Arc::clone(&movies);
-        move || Arc::clone(&movies)
-    });
-
-    let hashmap_filter = warp::any().map({
-        let hashmap = Arc::clone(&hashmap);
-        move || Arc::clone(&hashmap)
-    });
-
-    let submit = warp::path("submit")
-        .and(warp::query::<FormData>())
-        .and(movies_filter)
-        .and(hashmap_filter)
-        .map(|data: FormData, movies: Arc<Vec<Movie>>, hashmap: Arc<HashMap<String, Vec<MovieRank>>>| {
-            warp::reply::html(query(data, &movies, &hashmap))
-        });
-
-    let routes = form.or(submit);
-    
-    // Host server
-    println!("Server running at http://localhost:{PORT}/");
-    warp::serve(routes).run(([127, 0, 0, 1], PORT)).await;
-}
-
-fn query<'a>(data: FormData, movies: &'a [Movie], hashmap: &HashMap<String, Vec<MovieRank>>) -> String {
+fn query<'a>(data: FormData, movies: &'a [Movie], hashmap: &HashMap<String, Vec<MovieRank>>, max_tf: &Vec<f32>) -> String {
     let query: Vec<String> = data.query.split_whitespace().map(|q| q.to_string().to_lowercase()).collect();
 
     let start = Instant::now();
     let found = match data.method.as_str() {
         "naive" => Some(naive(movies, &query)),
-        "hashmap" => Some(query_hashmap(hashmap, &query)),
+        "hashmap" => Some(query_hashmap(hashmap, &query, &max_tf, movies.len())),
         _ => None
     };
     let duration = start.elapsed();
 
-    if let Some(found) = found {
+    if let Some(mut found) = found {
+        // Sort found by relevance
+        found.sort_by(|a, b| b.relevance.partial_cmp(&a.relevance).unwrap());
+
         let mut table = String::from("<table border=1><tr><th>Title</th><th>Description</th></tr>");
         // let mut i = 0;
         for rank in found {
@@ -274,6 +236,68 @@ fn query<'a>(data: FormData, movies: &'a [Movie], hashmap: &HashMap<String, Vec<
             "#)
     }
 
+}
+
+#[tokio::main]
+async fn main() {
+    // Read console args
+   let args: Vec<String> = env::args().collect();
+    const PORT: u16 = 8080;
+
+    if args.len() != 2 {
+        println!("Usage: ./movies <movies.txt>");
+        return;
+    }
+
+    // Parse movie file
+    println!("Parsing {}...", args[1]);
+    let s = Instant::now();
+    let movies = Arc::new(parse(&args[1]));
+    //let movies = Arc::new(parse("movies.txt"));
+    println!("Parsed in {:.2?}", s.elapsed());
+
+    // TODO: Create inverted index with hashmap
+    println!("Creating hashmap...");
+    let s = Instant::now();
+    let (hashmap, max_tf) = create_inverted_index_hash_map(&movies);
+    let hashmap = Arc::new(hashmap);
+    let max_tf = Arc::new(max_tf);
+    println!("Created hashmap in {:.2?}", s.elapsed());
+
+    // Simple HTML server
+    let form = warp::path::end()
+        .map(|| warp::reply::html(FORM_HTML));
+
+    // Handle query
+    let movies_filter = warp::any().map({
+        let movies = Arc::clone(&movies);
+        move || Arc::clone(&movies)
+    });
+
+    let hashmap_filter = warp::any().map({
+        let hashmap = Arc::clone(&hashmap);
+        move || Arc::clone(&hashmap)
+    });
+
+    let max_tf_filter = warp::any().map({
+        let max_tf = Arc::clone(&max_tf);
+        move || Arc::clone(&max_tf)
+    });
+
+    let submit = warp::path("submit")
+        .and(warp::query::<FormData>())
+        .and(movies_filter)
+        .and(hashmap_filter)
+        .and(max_tf_filter)
+        .map(|data: FormData, movies: Arc<Vec<Movie>>, hashmap: Arc<HashMap<String, Vec<MovieRank>>>, max_tf: Arc<Vec<f32>>| {
+            warp::reply::html(query(data, &movies, &hashmap, &max_tf))
+        });
+
+    let routes = form.or(submit);
+    
+    // Host server
+    println!("Server running at http://localhost:{PORT}/");
+    warp::serve(routes).run(([127, 0, 0, 1], PORT)).await;
 }
 
 #[derive(Debug, serde::Deserialize)]

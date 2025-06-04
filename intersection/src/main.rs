@@ -52,12 +52,12 @@ fn binary_search(v: &[u32], s: u32, mut left: usize, mut right: usize) -> Option
 }
 
 fn intersect_galopping_search(a: &[u32], b: &[u32]) -> Vec<u32> {
-    let mut left = 1;
+    let mut left = 0;
     b
         .iter()
         .filter_map(|be| {
             if let Some(new_left) = galloping_search(a, *be, left) {
-                left = new_left + 1;
+                left = new_left;
                 Some(*be) 
             } else { 
                 None 
@@ -71,7 +71,7 @@ fn galloping_search(v: &[u32], s: u32, left: usize) -> Option<usize> {
         return None;
     }
 
-    let mut bound = left;
+    let mut bound = left + 1;
 
     while bound < v.len() && v[bound] < s {
         bound *= 2;
@@ -99,21 +99,21 @@ fn main() {
         b.sort();
 
         let s = Instant::now();
-        let result_native = intersect_naive(&a, &b);
+        let result_naive = intersect_naive(&a, &b);
         //dbg!(&result_native);
         println!("intersect_naive() took: {:.2?}", s.elapsed());
-        assert_eq!(result_native.len(), b.len());
+        assert_eq!(result_naive.len(), b.len());
 
         let s = Instant::now();
         let result_binary_search = intersect_binary_search(&a, &b);
         println!("intersect_binary_search() took: {:.2?}", s.elapsed());
-        assert_eq!(result_native, result_binary_search);
+        assert_eq!(result_naive, result_binary_search);
         //dbg!(&result_binary_search);
 
         let s = Instant::now();
         let result_galloping: Vec<u32> = intersect_galopping_search(&a, &b);
         println!("intersect_galopping_search() took: {:.2?}", s.elapsed());
-        assert_eq!(result_native, result_galloping);
+        assert_eq!(result_naive, result_galloping);
 
     } 
 }
@@ -121,6 +121,99 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::OpenOptions;
+    use std::io::{self, Write};
+
+    #[test]
+    fn test_whats_faster() {
+        const n: u32 = 100000000;
+
+        #[derive(Debug, PartialEq)]
+        enum IntersectionType {
+            NONE,
+            NAIVE,
+            BINARY,
+            GALLOPING
+        }
+
+        let a: Vec<u32> = (0..n).collect();
+        let mut fastest = IntersectionType::NONE;
+    
+        let mut rng = thread_rng();
+        for i in 0..n.ilog2() {
+            let mut b: Vec<u32> = (0..n).choose_multiple(&mut rng, (n / 2u32.pow(i)) as usize);
+            b.sort();
+    
+            let s = Instant::now();
+            let result_naive = intersect_naive(&a, &b);
+            let duration_naive = s.elapsed();
+            assert_eq!(result_naive.len(), b.len());
+    
+            let s = Instant::now();
+            let result_binary_search = intersect_binary_search(&a, &b);
+            let duration_binary = s.elapsed();
+            assert_eq!(result_naive, result_binary_search);
+    
+            let s = Instant::now();
+            let result_galloping: Vec<u32> = intersect_galopping_search(&a, &b);
+            let duration_galloping = s.elapsed();
+            assert_eq!(result_naive, result_galloping);
+            
+            if duration_naive < duration_binary && duration_naive < duration_galloping && fastest != IntersectionType::NAIVE {
+                fastest = IntersectionType::NAIVE;
+                println!("-----");
+                println!("Fastest for |a| = {} and |b| = {}: {:?} [{:.2?}].", a.len(), b.len(), fastest, duration_naive);
+                println!("Others: {:?} [{:.2?}], {:?} [{:.2?}]", IntersectionType::BINARY, duration_binary, IntersectionType::GALLOPING, duration_galloping);
+            } else if duration_binary < duration_naive && duration_binary < duration_galloping && fastest != IntersectionType::BINARY {
+                fastest = IntersectionType::BINARY;
+                println!("-----");
+                println!("Fastest for |a| = {} and |b| = {}: {:?} [{:.2?}].", a.len(), b.len(), fastest, duration_binary);
+                println!("Others: {:?} [{:.2?}], {:?} [{:.2?}]", IntersectionType::NAIVE, duration_naive, IntersectionType::GALLOPING, duration_galloping);
+            } else if duration_galloping < duration_naive && duration_galloping < duration_binary && fastest != IntersectionType::GALLOPING {
+                fastest = IntersectionType::GALLOPING;
+                println!("-----");
+                println!("Fastest for |a| = {} and |b| = {}: {:?} [{:.2?}].", a.len(), b.len(), fastest, duration_galloping);
+                println!("Others: {:?} [{:.2?}], {:?} [{:.2?}]", IntersectionType::NAIVE, duration_naive, IntersectionType::BINARY, duration_binary);
+            }
+        } 
+    }
+
+    #[test]
+    fn csv_test_whats_faster() {
+        const n: u32 = 100000000;
+        let a: Vec<u32> = (0..n).collect();
+        let mut file = OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .create(true)
+            .open("csv_test_whats_faster.csv")
+            .expect("Cannot create file");
+    
+        writeln!(file, "ab,duration_naive,duration_binary,duration_galloping").unwrap();
+
+        let mut rng = thread_rng();
+        for i in 0..n.ilog2() {
+            let mut b: Vec<u32> = (0..n).choose_multiple(&mut rng, (n / 2u32.pow(i)) as usize);
+            b.sort();
+    
+            let s = Instant::now();
+            let result_naive = intersect_naive(&a, &b);
+            let duration_naive = s.elapsed();
+            assert_eq!(result_naive.len(), b.len());
+    
+            let s = Instant::now();
+            let result_binary_search = intersect_binary_search(&a, &b);
+            let duration_binary = s.elapsed();
+            assert_eq!(result_naive, result_binary_search);
+    
+            let s = Instant::now();
+            let result_galloping: Vec<u32> = intersect_galopping_search(&a, &b);
+            let duration_galloping = s.elapsed();
+            assert_eq!(result_naive, result_galloping);
+
+            writeln!(file, "{},{},{},{}", (a.len() as f64 / b.len() as f64).ln(), duration_naive.as_nanos(), duration_binary.as_nanos(), duration_galloping.as_nanos()).unwrap();
+        } 
+    }
 
     #[test]
     fn test_intersect_naive_basic() {

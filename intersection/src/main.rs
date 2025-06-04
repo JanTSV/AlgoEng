@@ -23,33 +23,55 @@ fn intersect_naive(a: &[u32], b: &[u32]) -> Vec<u32> {
 }
 
 fn intersect_binary_search(a: &[u32], b: &[u32]) -> Vec<u32> {
-    b.iter().filter_map(|be| if binary_search(a, *be, 0, a.len()) { Some(*be) } else { None }).collect()
+    let mut left = 0;
+    b
+        .iter()
+        .filter_map(|be| {
+            if let Some(new_left) = binary_search(a, *be, left, a.len()) {
+                left = new_left;
+                Some(*be) 
+            } else { 
+                None 
+            }
+        })
+        .collect()
 }
 
-fn binary_search(v: &[u32], s: u32, mut left: usize, mut right: usize) -> bool {
+fn binary_search(v: &[u32], s: u32, mut left: usize, mut right: usize) -> Option<usize> {
     while left < right {
         let mid = left + (right - left) / 2;
         if v[mid] == s {
-            return true;
+            return Some(mid);
         } else if v[mid] < s {
             left = mid + 1;
         } else {
             right = mid;
         }
     }
-    false
+    None
 }
 
 fn intersect_galopping_search(a: &[u32], b: &[u32]) -> Vec<u32> {
-    b.iter().filter_map(|be| if galloping_search(a, *be) { Some(*be) } else { None }).collect()
+    let mut left = 1;
+    b
+        .iter()
+        .filter_map(|be| {
+            if let Some(new_left) = galloping_search(a, *be, left) {
+                left = new_left + 1;
+                Some(*be) 
+            } else { 
+                None 
+            }
+        })
+        .collect()
 }
 
-fn galloping_search(v: &[u32], s: u32) -> bool {
+fn galloping_search(v: &[u32], s: u32, left: usize) -> Option<usize> {
     if v.is_empty() {
-        return false;
+        return None;
     }
 
-    let mut bound = 1;
+    let mut bound = left;
 
     while bound < v.len() && v[bound] < s {
         bound *= 2;

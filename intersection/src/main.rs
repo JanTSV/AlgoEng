@@ -1,5 +1,5 @@
 use std::{env, time::Instant};
-use rand::{thread_rng, seq::IteratorRandom};
+use rand::{thread_rng, Rng};
 
 fn intersect_naive(a: &[u32], b: &[u32]) -> Vec<u32> {
     let mut i_a = 0;
@@ -95,8 +95,11 @@ fn main() {
     let mut rng = thread_rng();
     for i in 0..n.ilog2() {
         println!("-----");
-        let mut b: Vec<u32> = (0..n).choose_multiple(&mut rng, (n / 2u32.pow(i)) as usize);
+        let mut b: Vec<u32> = (0..(n / 2_u32.pow(i))).map(|_| rng.gen_range(0..n)).collect();
         b.sort();
+        b.dedup();
+        println!("|a| = {}, |b| = {}", a.len(), b.len());
+
 
         let s = Instant::now();
         let result_naive = intersect_naive(&a, &b);
@@ -120,6 +123,8 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    use rand::seq::IteratorRandom;
+
     use super::*;
     use std::fs::OpenOptions;
     use std::io::{self, Write};

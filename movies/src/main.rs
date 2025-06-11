@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use warp::Filter;
 use std::sync::Arc;
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 
 #[derive(Debug)]
 struct Movie {
@@ -119,6 +119,36 @@ fn create_inverted_index_hash_map(movies: &[Movie]) -> (HashMap<String, Vec<Movi
     (hashmap, max_tf)
 }
 
+fn create_inverted_index_tree(movies: &[Movie]) -> BTreeMap<String, Vec<MovieRank>> {
+    let mut tree: BTreeMap<String, Vec<MovieRank>> = BTreeMap::new();
+
+    // let mut last = 0;
+    for (i, movie) in movies.iter().enumerate() {
+        for word in iter_words(&movie.description) {
+            match tree.get_mut(&word) {
+                Some(x) =>  {
+                    match x.last_mut() {
+                        Some(y) if y.id == i => {
+                            // First relevance just counts the number of occurences
+                            y.relevance += 1.0;
+                        },
+                        _ => {
+                            x.push(MovieRank::new(i));
+                        }
+                    }
+                },
+                None => {
+                    let mut v = Vec::new();
+                    v.push(MovieRank::new(i));
+                    tree.insert(word, v);
+                }
+            }
+        }
+    }
+
+    tree
+}
+
 fn binary_search<'a>(v: &'a [MovieRank], s: &MovieRank, mut left: usize, mut right: usize) -> Option<&'a MovieRank> {
     while left < right {
         let mid = left + (right - left) / 2;
@@ -182,13 +212,39 @@ fn query_hashmap(hashmap: &HashMap<String, Vec<MovieRank>>, query: &[String], ma
     found
 }
 
-fn query<'a>(data: FormData, movies: &'a [Movie], hashmap: &HashMap<String, Vec<MovieRank>>, max_tf: &Vec<f32>) -> String {
+fn query_tree(tree: &BTreeMap<String, Vec<MovieRank>>, query: &[String], max_tf: &[f32], n: usize) -> Vec<MovieRank> {
+    let mut found: Vec<MovieRank> = Vec::new();
+    let mut first = true;
+
+    for q in query {
+        match tree.get(q) {
+            Some(q_found) => {
+                match first {
+                    false => found = intersect_galopping_search(&found, &q_found, n, q_found.len(), max_tf),
+                    true => {
+                        found.extend(q_found.iter().map(|x| {
+                            let relevance = calc_relevance(n, q_found.len(), x.relevance, max_tf[x.id]);
+                            MovieRank { id: x.id, relevance }
+                        }));
+                        first = false;
+                    }
+                }
+            },
+            None => continue
+        } 
+    }
+
+    found
+}
+
+fn query<'a>(data: FormData, movies: &'a [Movie], hashmap: &HashMap<String, Vec<MovieRank>>, tree: &BTreeMap<String, Vec<MovieRank>>, max_tf: &Vec<f32>) -> String {
     let query: Vec<String> = data.query.split_whitespace().map(|q| q.to_string().to_lowercase()).collect();
 
     let start = Instant::now();
     let found = match data.method.as_str() {
         "naive" => Some(naive(movies, &query)),
         "hashmap" => Some(query_hashmap(hashmap, &query, &max_tf, movies.len())),
+        "tree" => Some(query_tree(tree, &query, &max_tf, movies.len())),
         _ => None
     };
     let duration = start.elapsed();
@@ -256,13 +312,19 @@ async fn main() {
     //let movies = Arc::new(parse("movies.txt"));
     println!("Parsed in {:.2?}", s.elapsed());
 
-    // TODO: Create inverted index with hashmap
+    // Create inverted index with hashmap
     println!("Creating hashmap...");
     let s = Instant::now();
     let (hashmap, max_tf) = create_inverted_index_hash_map(&movies);
     let hashmap = Arc::new(hashmap);
     let max_tf = Arc::new(max_tf);
     println!("Created hashmap in {:.2?}", s.elapsed());
+
+    // Create inverted index with search tree
+    println!("Creating search tree...");
+    let s = Instant::now();
+    let tree = Arc::new(create_inverted_index_tree(&movies));
+    println!("Created search tree in {:.2?}", s.elapsed());
 
     // Simple HTML server
     let form = warp::path::end()
@@ -279,6 +341,11 @@ async fn main() {
         move || Arc::clone(&hashmap)
     });
 
+    let tree_filter = warp::any().map({
+        let tree = Arc::clone(&tree);
+        move || Arc::clone(&tree)
+    });
+
     let max_tf_filter = warp::any().map({
         let max_tf = Arc::clone(&max_tf);
         move || Arc::clone(&max_tf)
@@ -288,9 +355,10 @@ async fn main() {
         .and(warp::query::<FormData>())
         .and(movies_filter)
         .and(hashmap_filter)
+        .and(tree_filter)
         .and(max_tf_filter)
-        .map(|data: FormData, movies: Arc<Vec<Movie>>, hashmap: Arc<HashMap<String, Vec<MovieRank>>>, max_tf: Arc<Vec<f32>>| {
-            warp::reply::html(query(data, &movies, &hashmap, &max_tf))
+        .map(|data: FormData, movies: Arc<Vec<Movie>>, hashmap: Arc<HashMap<String, Vec<MovieRank>>>, tree: Arc<BTreeMap<String, Vec<MovieRank>>>, max_tf: Arc<Vec<f32>>| {
+            warp::reply::html(query(data, &movies, &hashmap, &tree, &max_tf))
         });
 
     let routes = form.or(submit);
@@ -320,7 +388,7 @@ const FORM_HTML: &str = r#"
         <select name="method">
             <option value="naive">naive</option>
             <option value="hashmap">hashmap</option>
-            <option value="option2">option2</option>
+            <option value="tree">tree</option>
         </select><br><br>
 
         <input type="submit" value="Submit">

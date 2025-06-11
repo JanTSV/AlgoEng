@@ -71,13 +71,19 @@ fn galloping_search(v: &[u32], s: u32, left: usize) -> Option<usize> {
         return None;
     }
 
-    let mut bound = left + 1;
+    let mut end = left + 1;
+    let mut start = 0;
 
-    while bound < v.len() && v[bound] < s {
-        bound *= 2;
+    for i in 0.. {
+        if end < v.len() && v[end] < s {
+            start = end;
+            end += 1 << i;
+        } else {
+            break;
+        }
     }
 
-    binary_search(v, s, bound / 2, (bound + 1).min(v.len()))
+    binary_search(v, s, start, (end + 1).min(v.len()))
 }
 
 fn main() {
@@ -127,7 +133,7 @@ mod tests {
 
     use super::*;
     use std::fs::OpenOptions;
-    use std::io::{self, Write};
+    use std::io::Write;
 
     #[test]
     fn test_whats_faster() {
